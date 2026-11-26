@@ -12,6 +12,7 @@ Route::middleware(['web', 'auth', 'active', 'project'])->prefix('meetings')->nam
     Route::post('/add-issue', [MeetingController::class, 'addIssue'])->name('add-issue');
     Route::post('/add-issues', [MeetingController::class, 'bulkAddIssues'])->name('add-issues');
     Route::get('/{id}', [MeetingController::class, 'show'])->whereNumber('id')->name('show');
+    Route::post('/{id}/documents/batch', [MeetingController::class, 'storeDocuments'])->whereNumber('id')->name('documents.store');
     Route::post('/{id}/documents', [MeetingController::class, 'uploadDocument'])->whereNumber('id')->name('documents.upload');
     Route::get('/{id}/documents/{document}', [MeetingController::class, 'document'])->whereNumber(['id', 'document'])->name('documents.show');
     Route::get('/{id}/edit', [MeetingController::class, 'edit'])->whereNumber('id')->name('edit');

@@ -229,16 +229,10 @@ function init(root) {
     async function uploadFile(file) {
         try {
             setStatus('準備上傳 0%');
-            const meeting = /^meeting:(notes|internal):([0-9]+)$/.exec(context);
-            let r;
-            if (meeting && /\.md$/i.test(file.name)) {
-                const fd = new FormData();
-                fd.append('file', file);
-                fd.append('internal', meeting[1] === 'internal' ? '1' : '0');
-                r = await api('/meetings/' + meeting[2] + '/documents', { body: fd });
-            } else {
-                r = await uploadChunks(file);
+            if (/^meeting:(notes|internal):/.test(context) && /\.md$/i.test(file.name)) {
+                throw new Error('請在「Markdown 文件」區塊上傳 .md 檔。');
             }
+            const r = await uploadChunks(file);
             editor
                 .chain()
                 .focus()

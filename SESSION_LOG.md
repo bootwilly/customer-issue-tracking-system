@@ -494,3 +494,12 @@
 - The document list follows saved link order and visibility. Preview and original download check current meeting access and references. Markdown preview reuses the sanitized flow renderer. Default limit: 200000 bytes, capped by the existing attachment limit.
 - Updated the meeting manual and regenerated offline HTML/PDF. Unit suite: 7 passed, 50 assertions (repository doubles and private test storage). Verified route registration, Blade compilation, subpath Vite build, and a headless Chrome fixture exercising the actual multi-file editor and preview switching with mocked upload responses.
 - No database writes, live-account test, commit, push or deployment.
+
+## 2026-11-26 Production deployment of meeting Markdown documents
+- IN PROGRESS: 1f2695e. Verified 7 existing files and 2 manifests for rollback, 3 new paths absent. Isolated SQLite full suite 216/216 (3797 assertions); separate multi-role document lifecycle passed (24 assertions).
+- DONE 2026-11-26 18:27:38 Asia/Taipei. Pushed feature branch and deployed 1f2695e. Verified SHA-256 of 10 runtime/manual files, all 99 public assets and 2 manifests. Canonical URLs for both new assets and manifests matched. Guest meeting/list, document preview/download and manual returned 302 to login; login returned 200. Log listing unchanged. Retried a timed-out asset transfer before manifest switch; private parts and one-time installer cleanup verified. No production DB migrations or authenticated writes. Rollback copies and file manifest: %LOCALAPPDATA%/CITS/deployment-backups/1f2695e/run-20261126181452.
+
+## 2026-11-26 Standalone meeting documents section
+- Added a header shortcut and an always-visible Markdown card above meeting notes. Editors upload batches independently; the page refreshes only the document list. Staff uploads default to internal. Prior note links keep their visibility rules.
+- New batches use existing attachment ownership with a dedicated context. A file validation failure leaves staged files temporary for scheduled cleanup. No schema change.
+- Local unit suite passed (9 tests, 64 assertions), routes registered, Blade compiled and the /mescits Vite build passed. Offline HTML and PDF manuals regenerated. No deployment or commit.

@@ -2,15 +2,27 @@
 
 namespace App\Services\Meeting;
 
+use App\Models\Attachment;
 use App\Models\Meeting;
 use App\Models\User;
 use App\Repositories\AttachmentRepository;
+use App\Services\AttachmentService;
 use Dom\HTMLDocument;
 use Illuminate\Support\Collection;
 
 class MeetingDocuments
 {
-    public function __construct(private MeetingService $meetings, private AttachmentRepository $attachments) {}
+    public function __construct(private MeetingService $meetings, private AttachmentRepository $attachments, private AttachmentService $storage) {}
+
+    public function upload(User $user, Meeting $meeting, array $files, bool $internal): void
+    {
+        $ids = [];
+        foreach ($files as $file) {
+            $ids[] = $this->storage->storeMeetingMarkdown($user, $file, Attachment::MEETING_DOCUMENTS)->id;
+        }
+        // A failed file leaves the batch temporary for the existing cleanup job.
+        $this->attachments->bindMeetingDocuments($ids, $user->id, $meeting->id, $internal ? 'meeting_internal' : 'meeting');
+    }
 
     public function visible(User $user, Meeting $meeting): Collection
     {
@@ -45,6 +57,6 @@ class MeetingDocuments
             }
         }
 
-        return $documents;
+        return $documents->concat($this->attachments->meetingDocuments($meeting->id, array_keys($sections)))->unique('id')->values();
     }
 }

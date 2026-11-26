@@ -26,6 +26,7 @@ it('lists current references once in note order and applies meeting visibility',
         'internal_html' => '<a href="/attachments/4">private</a>',
     ])->setRelation('creator', $staff);
     $repo = Mockery::mock(AttachmentRepository::class);
+    $repo->shouldReceive('meetingDocuments')->andReturn(new Models);
     $repo->shouldReceive('boundMarkdown')->with(3, 'meeting', [2, 1])->andReturn(new Models([
         1 => (new Attachment)->setRawAttributes(['id' => 1]),
         2 => (new Attachment)->setRawAttributes(['id' => 2]),
@@ -33,7 +34,7 @@ it('lists current references once in note order and applies meeting visibility',
     $repo->shouldReceive('boundMarkdown')->once()->with(3, 'meeting_internal', [4])->andReturn(new Models([
         4 => (new Attachment)->setRawAttributes(['id' => 4]),
     ]));
-    $docs = new MeetingDocuments(app(MeetingService::class), $repo);
+    $docs = new MeetingDocuments(app(MeetingService::class), $repo, app(AttachmentService::class));
     expect($docs->visible($staff, $meeting)->pluck('id')->all())->toBe([2, 1, 4])
         ->and($docs->visible($client, $meeting))->toBeEmpty();
     $meeting->published_at = now();
@@ -86,6 +87,7 @@ it('serves a sanitized preview and original bytes, then refuses both after unsha
     $workflow->shouldReceive('can')->with($client, 'meeting.view', 6)->andReturn(true);
     $this->app->instance(WorkflowService::class, $workflow);
     $repo = Mockery::mock(AttachmentRepository::class);
+    $repo->shouldReceive('meetingDocuments')->andReturn(new Models);
     $repo->shouldReceive('boundMarkdown')->with(3, 'meeting', [1])->andReturn(new Models([1 => $file]));
     $repo->shouldReceive('setting')->with('attachment.max_mb')->andReturn('1');
     $this->app->instance(AttachmentRepository::class, $repo);
@@ -130,4 +132,47 @@ it('stores each meeting upload privately in its editor context and rejects clien
             ->and($disk->get($saved[$index]['disk_path']))->toBe('# '.$name);
     }
     $this->post($url, ['internal' => '1'])->assertForbidden();
+});
+
+it('publishes a batch directly on a meeting with empty notes and returns the visible document list', function () {
+    $client = (new User)->setRawAttributes(['id' => 12, 'user_type' => 'client']);
+    $meeting = (new Meeting)->setRawAttributes(['id' => 3, 'project_id' => 6, 'customer_visible' => true])->setRelation('creator', $client);
+    $svc = Mockery::mock(MeetingService::class)->makePartial();
+    $svc->shouldReceive('canView')->with($client, 6)->andReturn(true);
+    $svc->shouldReceive('find')->with($client, 6, 3)->andReturn($meeting);
+    $svc->shouldReceive('canEdit')->with($client, $meeting)->andReturn(true);
+    $this->app->instance(MeetingService::class, $svc);
+    $repo = Mockery::mock(AttachmentRepository::class);
+    $repo->shouldReceive('setting')->with('attachment.max_mb')->andReturn('1');
+    $saved = [];
+    $repo->shouldReceive('create')->twice()->andReturnUsing(function ($data) use (&$saved) {
+        expect($data['draft_context_key'])->toBe(Attachment::MEETING_DOCUMENTS);
+        $file = (new Attachment)->setRawAttributes(['id' => count($saved) + 1] + $data);
+        $saved[] = $file;
+        return $file;
+    });
+    $repo->shouldReceive('bindMeetingDocuments')->once()->with([1, 2], 12, 3, 'meeting');
+    $repo->shouldReceive('meetingDocuments')->once()->with(3, ['meeting'])->andReturnUsing(fn () => new Models([
+        (new Attachment)->setRawAttributes(['id' => 1, 'original_name' => 'first.md']),
+        (new Attachment)->setRawAttributes(['id' => 2, 'original_name' => 'second.md']),
+    ]));
+    $this->app->instance(AttachmentRepository::class, $repo);
+    Storage::fake('local');
+    $this->withoutMiddleware()->actingAs($client)->withSession(['project_id' => 6]);
+    $url = route('meetings.documents.store', 3);
+    $this->postJson($url, ['internal' => '1'])->assertForbidden();
+    $files = array_map(fn ($name) => UploadedFile::fake()->createWithContent($name, '# Test'), ['first.md', 'second.md']);
+    $result = $this->post($url, ['internal' => '0', 'files' => $files], ['Accept' => 'application/json'])->assertOk();
+    expect($result->json('list'))->toContain('first.md', 'second.md', route('meetings.documents.show', [3, 2]));
+});
+
+it('keeps a partially staged batch out of the document list when a file fails', function () {
+    $storage = Mockery::mock(AttachmentService::class);
+    $repo = Mockery::mock(AttachmentRepository::class);
+    $storage->shouldReceive('storeMeetingMarkdown')->once()->ordered()->andReturn((new Attachment)->setRawAttributes(['id' => 1]));
+    $storage->shouldReceive('storeMeetingMarkdown')->once()->ordered()->andThrow(new BusinessException('格式錯誤'));
+    $repo->shouldNotReceive('bindMeetingDocuments');
+    $service = new MeetingDocuments(app(MeetingService::class), $repo, $storage);
+    $files = [UploadedFile::fake()->create('ok.md'), UploadedFile::fake()->create('bad.txt')];
+    expect(fn () => $service->upload(new User, new Meeting, $files, true))->toThrow(BusinessException::class);
 });

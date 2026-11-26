@@ -207,6 +207,30 @@ class MeetingController extends Controller
             'size' => $a->size, 'url' => route('attachments.show', $a->id)]);
     }
 
+    public function storeDocuments(Request $r, int $id)
+    {
+        $m = $this->documentMeeting($r, $id);
+        $internal = $r->boolean('internal');
+        abort_unless($this->svc->canEdit($r->user(), $m) && (! $internal || $r->user()->seesInternal()), 403);
+        $data = $r->validate(['files' => ['required', 'array', 'min:1'], 'files.*' => ['required', 'file'], 'internal' => ['required', 'boolean']]);
+        try {
+            $this->documents->upload($r->user(), $m, $data['files'], $internal);
+        } catch (BusinessException $e) {
+            if ($r->expectsJson()) {
+                return response()->json(['message' => $e->getMessage()], 422);
+            }
+
+            return back()->with('err', $e->getMessage());
+        }
+        if ($r->expectsJson()) {
+            $documents = $this->documents->visible($r->user(), $m);
+
+            return response()->json(['list' => view('meetings._document-list', compact('m', 'documents'))->render()]);
+        }
+
+        return redirect()->to(route('meetings.show', $id).'#documents')->with('ok', '文件已上傳。');
+    }
+
     public function document(Request $r, int $id, int $document, AttachmentService $attachments, FlowRenderer $renderer)
     {
         $m = $this->documentMeeting($r, $id);

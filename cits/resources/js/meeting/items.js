@@ -310,3 +310,31 @@ function pickIssues(url, stages) {
 }
 
 document.querySelectorAll('[data-items]').forEach(init);
+
+document.querySelector('[data-document-upload]')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const fields = form.querySelector('fieldset');
+    if (fields.disabled) return;
+    const body = new FormData(form);
+    const status = form.querySelector('[data-upload-status]');
+    const limit = Number(form.dataset.maxFiles);
+    if (limit > 0 && body.getAll('files[]').length > limit) {
+        status.textContent = '一次最多可上傳 ' + limit + ' 份文件，請分批上傳。';
+        return;
+    }
+    fields.disabled = true;
+    status.textContent = '上傳中…';
+    try {
+        const response = await fetch(form.action, { method: 'POST', headers: { Accept: 'application/json' }, body });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || '文件上傳失敗。');
+        form.parentElement.querySelector('[data-document-list]').innerHTML = result.list;
+        form.reset();
+        status.textContent = '文件已上傳。';
+    } catch (error) {
+        status.textContent = error.message;
+    } finally {
+        fields.disabled = false;
+    }
+});

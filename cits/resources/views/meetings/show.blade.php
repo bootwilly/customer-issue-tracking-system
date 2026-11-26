@@ -45,6 +45,7 @@
             @if ($canEdit)
                 <a href="{{ route('meetings.edit', $m->id) }}" class="{{ $btn }} bg-white text-slate-700 ring-1 ring-slate-300 hover:bg-slate-50">修改資料</a>
             @endif
+            <a href="#documents" class="{{ $btn }} text-indigo-700 hover:underline">Markdown 文件</a>
             <a href="{{ route('meetings.ics', $m->id) }}" class="{{ $btn }} text-slate-600 hover:underline">加入行事曆（.ics）</a>
             @if ($canExport)
                 <a href="{{ route('meetings.export-one', $m->id) }}" class="{{ $btn }} text-emerald-700 hover:underline">匯出 Excel</a>
@@ -107,6 +108,38 @@
                 @endif
             </section>
 
+            <section id="documents" class="{{ $card }}" x-data="{ selected: '' }">
+                <h2 class="mb-2 text-base font-semibold">Markdown 文件</h2>
+                @if ($canEdit)
+                    <form data-document-upload data-max-files="{{ (int) ini_get('max_file_uploads') }}" method="POST" enctype="multipart/form-data" action="{{ route('meetings.documents.store', $m->id) }}" class="mb-4">
+                        @csrf
+                        <fieldset class="flex flex-wrap items-center gap-3">
+                            <label class="text-sm">選取 Markdown 文件
+                                <input type="file" name="files[]" accept=".md" multiple required class="block text-sm">
+                            </label>
+                            @if ($isClient)
+                                <input type="hidden" name="internal" value="0">
+                            @else
+                                <label class="text-sm">可見範圍
+                                    <select name="internal" class="{{ $box }}">
+                                        <option value="1">僅內部</option>
+                                        <option value="0">依會議分享設定</option>
+                                    </select>
+                                </label>
+                            @endif
+                            <button type="submit" class="{{ $btn }} bg-indigo-600 text-white hover:bg-indigo-700">上傳文件</button>
+                        </fieldset>
+                        <p data-upload-status role="status" class="mt-1 text-sm"></p>
+                    </form>
+                @endif
+                <div data-document-list>
+                    @include('meetings._document-list')
+                </div>
+                <template x-if="selected">
+                    <iframe title="Markdown 文件預覽" class="mt-3 h-96 w-full rounded border" :src="selected"></iframe>
+                </template>
+            </section>
+
             <section id="notes" class="{{ $card }}">
                 <h2 class="mb-2 text-base font-semibold">補充紀錄</h2>
                 @if ($canEdit)
@@ -134,27 +167,6 @@
                     @endif
                 @endif
             </section>
-
-            @if ($documents->isNotEmpty())
-                <section class="{{ $card }}" x-data="{ selected: '' }">
-                    <h2 class="mb-2 text-base font-semibold">Markdown 文件</h2>
-                    <ul class="space-y-1">
-                        @foreach ($documents as $document)
-                            @php($url = route('meetings.documents.show', [$m->id, $document->id]))
-                            <li>
-                                <a class="text-indigo-700 underline" href="{{ $url }}" @click.prevent="selected = $el.href">{{ $document->original_name }}</a>
-                                @if ($document->owner_type === 'meeting_internal')
-                                    <span class="text-xs text-slate-500">內部備註</span>
-                                @endif
-                                <a class="ml-2 text-sm underline" href="{{ $url }}?download=1" aria-label="下載 {{ $document->original_name }}">下載</a>
-                            </li>
-                        @endforeach
-                    </ul>
-                    <template x-if="selected">
-                        <iframe title="Markdown 文件預覽" class="mt-3 h-96 w-full rounded border" :src="selected"></iframe>
-                    </template>
-                </section>
-            @endif
 
             @include('meetings._comments')
         </div>

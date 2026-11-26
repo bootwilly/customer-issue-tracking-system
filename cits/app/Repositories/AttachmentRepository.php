@@ -27,6 +27,20 @@ class AttachmentRepository
             ->whereIntegerInRaw('id', $ids)->get()->keyBy('id');
     }
 
+    public function meetingDocuments(int $meetingId, array $owners): Collection
+    {
+        return Attachment::query()->where('state', 'bound')->where('owner_id', $meetingId)
+            ->whereIn('owner_type', $owners)->where('draft_context_key', Attachment::MEETING_DOCUMENTS)
+            ->orderBy('id')->get();
+    }
+
+    public function bindMeetingDocuments(array $ids, int $userId, int $meetingId, string $owner): void
+    {
+        Attachment::query()->whereIntegerInRaw('id', $ids)->where('uploaded_by', $userId)
+            ->where('draft_context_key', Attachment::MEETING_DOCUMENTS)->where('state', 'temp')
+            ->update(['state' => 'bound', 'owner_type' => $owner, 'owner_id' => $meetingId]);
+    }
+
     public function create(array $data): Attachment
     {
         return Attachment::query()->create($data);
