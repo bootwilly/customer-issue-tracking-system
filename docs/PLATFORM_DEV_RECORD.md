@@ -139,7 +139,7 @@ Email 只在以下條件都成立時才寄：郵件設定已啟用、使用者�
 ## 7. 開發環境（本機，Windows）
 
 - PHP：`/c/Users/<you>/AppData/Local/Microsoft/WinGet/Packages/PHP.PHP.NTS.8.5_Microsoft.Winget.Source_8wekyb3d8bbwe/php.exe`
-- 測試：在 `cits` 目錄執行 `php vendor/bin/pest`，目前 226 個全過。
+- 測試：在 `cits` 目錄執行 `php vendor/bin/pest`，目前 230 個全過。
   - 和時間有關的程式要用 `now()`（Carbon），不要用 `time()`，否則測試的 `travel()` 沒有作用。
   - `SeedDataLengthTest` 會把所有 migration 以 MariaDB DDL 的 pretend 模式編譯，並檢查 `workflow.php` 的種子值有沒有超過欄位長度。
   - 因此資料 migration 必須用 `DB::statement` 寫原生 SQL。用 query builder 寫的 update 在 pretend 模式下會嘗試連線而失敗。
@@ -158,8 +158,8 @@ Email 只在以下條件都成立時才寄：郵件設定已啟用、使用者�
 1. 產生升級 SQL：`php deploy/make_upgrade_sql.php --applied=<已套用的 migration 名稱，逗號分隔>`，輸出到 `deploy/out/upgrade-<日期時間>.sql`。
    - 內容：未套用的 migration DDL、對應的 migration 紀錄，以及 lookup／setting／transition／權限的 INSERT IGNORE（已存在的資料不會被改）。
    - **要修改既有資料列，只能寫 migration**，因為 INSERT IGNORE 不會更新已存在的資料。
-   - 正式站目前已套用到 `2026_12_01_000100_create_auth_logs_table`（共 15 個，2026-11-27 以唯讀查詢確認和 repo 一致）。
-   - 2026-11-27 已把 `deploy/out/install.sql` 重新產生為最終版（含全部 15 個 migration），所以之後產生升級 SQL **不用再帶 `--applied`**。每次正式站跑完升級 SQL，都要重新產生它，否則下次會重複產生已套用的 DDL。完整流程見 `docs/DEPLOYMENT_GUIDE.md`。
+   - 正式站目前已套用到 `2026_12_02_000100_widen_attachment_types`（共 16 個，2026-11-27 以唯讀查詢確認和 repo 一致）。
+   - 2026-11-27 已把 `deploy/out/install.sql` 重新產生為最終版（含全部 16 個 migration），所以之後產生升級 SQL **不用再帶 `--applied`**。每次正式站跑完升級 SQL，都要重新產生它，否則下次會重複產生已套用的 DDL。完整流程見 `docs/DEPLOYMENT_GUIDE.md`。
 2. 交給使用者在 phpMyAdmin 執行。**要先在左側點選 `cpuser_mescits`**，曾經發生過跑到別的資料庫。
 3. 用一次性的唯讀 SELECT 腳本確認結果。腳本範本在本次 session 的暫存資料夾（scratchpad 底下的 `vq/`）：
    - 用 token 保護，執行一次就自刪。
@@ -220,6 +220,7 @@ Email 只在以下條件都成立時才寄：郵件設定已啟用、使用者�
 |---|---|
 | 閒置自動登出 | 60 分鐘沒有操作就登出；剩 2 分鐘時跳出提示和「繼續使用」；多分頁共用計時；停用「記住我」 |
 | 登入紀錄 | 9 種登入事件加來源 IP 寫入 `auth_logs`；系統管理頁可篩選、匯出；保留 180 天。升級 SQL `upgrade-20261126-1633.sql` 已執行並確認 |
+| 安全強化 | 主機代理會採用連線端送的 X-Forwarded-For，所以 IP 可以被偽造：登入和忘記密碼的次數限制改成也依帳號計算。附件類型改成 Office、PDF、文字、JSON、Markdown、zip／rar／7z、圖片、影片。`@richtext` 在顯示時再過濾一次 HTML；`SecurityHeaders` middleware；附件加上 CSP sandbox。升級 SQL `upgrade-20261126-1700.sql` 已執行並確認 |
 
 ---
 

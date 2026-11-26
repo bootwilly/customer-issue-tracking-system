@@ -30,5 +30,5 @@
         @include('admin.auth-logs._table', ['rows' => $logs, 'withUser' => true])
     </div>
     <div class="mt-4">{{ $logs->links() }}</div>
-    <p class="mt-2 text-xs text-slate-500">時間為台北時間。IP 由主機前端代理轉送；若和 X-Forwarded-For（灰字）不同，兩個都列出。</p>
+    <p class="mt-2 text-xs text-slate-500">時間為台北時間。<strong class="text-amber-700">IP 僅供參考：</strong>目前主機的前端代理會採用連線端自己送來的 X-Forwarded-For，所以 IP 可以被偽造（一般瀏覽器不會送這個標頭）。登入次數限制另外以帳號計算，不受影響。</p>
 @endsection

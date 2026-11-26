@@ -1,6 +1,6 @@
 # CITS 部署手冊（現況版）
 
-> 版本：2026-11-27。正式站已套用到 migration `2026_12_01_000100_create_auth_logs_table`（共 15 個），程式碼和正式站同步。
+> 版本：2026-11-27。正式站已套用到 migration `2026_12_02_000100_widen_attachment_types`（共 16 個），程式碼和正式站同步。
 > 本手冊說明：平台需求、系統特性、**全新安裝**、**資料庫升級**、**程式部署**、手冊部署、draw.io 部署、上線後設定、驗證、出問題時怎麼處理，以及每一步的注意事項。
 > 開發相關的背景請看 `docs/PLATFORM_DEV_RECORD.md`；長期規則請看 `PROJECT_CONTEXT.md`。
 
@@ -76,10 +76,10 @@
 
 | 檔案 | 用途 |
 |---|---|
-| **`deploy/out/install-20261127.sql`** | **全新安裝用的最終版**：空的資料庫執行一次，就建好全部 15 個 migration 的表、索引、外鍵，以及全部種子資料（狀態 27、轉換 40、欄位規則 11、選項 238、系統設定 18、權限 36、角色 6、角色權限 72）和初始管理員帳號 |
+| **`deploy/out/install-20261127.sql`** | **全新安裝用的最終版**：空的資料庫執行一次，就建好全部 16 個 migration 的表、索引、外鍵，以及全部種子資料（狀態 27、轉換 40、欄位規則 11、選項 239、系統設定 20、權限 36、角色 6、角色權限 72）和初始管理員帳號 |
 | `deploy/out/install.sql` | 內容同上。`make_upgrade_sql.php` 會以它的 migration 清單當作「已套用」的基準 |
 | `deploy/out/install-20261123.sql`、`install-20261126.sql` | 舊版（14 個 migration 以前），只留作紀錄，**不要再使用** |
-| `deploy/out/upgrade-20261126-0431.sql`、`upgrade-20261126-0559.sql`、`upgrade-20261126-1633.sql` | 正式站已執行過的升級檔，留作紀錄，**不要重跑**（1633 是登入紀錄 `auth_logs`） |
+| `deploy/out/upgrade-20261126-0431.sql`、`upgrade-20261126-0559.sql`、`upgrade-20261126-1633.sql`、`upgrade-20261126-1700.sql` | 正式站已執行過的升級檔，留作紀錄，**不要重跑**（1633 是登入紀錄 `auth_logs`，1700 是附件類型和依帳號的登入限制） |
 
 **正式站現在不需要跑任何 SQL。** 以後有新的 migration 或種子資料時，照第 5 節產生新的升級 SQL。
 
@@ -182,7 +182,7 @@ foreach ($d in 'app\private','app\public','framework\cache\data','framework\sess
 ```bash
 cd "$S" && find cits docs deploy -type f -not -path "*/vendor/*" -not -path "*/node_modules/*" -print0 | sort -z | xargs -0 md5sum > ../snap.md5
 cd cits && ASSET_URL=/mescits npm run build          # Windows 上是 npm.cmd
-php artisan test                                      # 必須全過（目前 226 個）
+php artisan test                                      # 必須全過（目前 230 個）
 ```
 - `ASSET_URL=/mescits` 一定要帶，否則前端檔路徑會錯。
 - 測試沒全過就停止部署。
@@ -301,7 +301,11 @@ python -I deploy/build.py --no-npm
 6. **登入安全**（system_settings，目前沒有畫面，要改請產生 SQL 由使用者執行）：
    - `session.idle_minutes`：閒置幾分鐘自動登出，預設 60，0 = 關閉。開啟時登入頁不顯示「記住我」。
    - `auth_log.keep_days`：登入紀錄保留天數，預設 180，0 = 永久保留。
+   - `login.max_attempts`／`login.decay_minutes`：同一個帳號加 IP 的失敗上限（5 次／15 分鐘）。
+   - `login.account_max_attempts`／`login.account_decay_minutes`：同一個帳號不論 IP 的失敗上限（10 次／15 分鐘，0 = 關閉）。因為 IP 可以被偽造，這層才擋得住暴力破解。
+   - `attachment.allowed_ext`：附件可上傳的副檔名，逗號分隔。
    - 登入紀錄在「系統管理 → 登入紀錄」。IP 取自 `Request::ip()`（主機前面是 openresty 代理，`trustProxies('*')` 會採用代理附加在 `X-Forwarded-For` 最右邊的值）；原始 `X-Forwarded-For` 也一起存。
+   - **2026-11-27 實測**：正式站的 openresty 會把連線端自己送的 `X-Forwarded-For` 拿來當 `REMOTE_ADDR`，並刪掉原本的標頭，PHP 拿不到真實 IP。一般瀏覽器記到的 IP 是正確的，但 IP 可以被偽造。要根本解決，請主機商只信任自己代理的 `X-Forwarded-For`。
 
 ---
 
@@ -332,6 +336,7 @@ python -I deploy/build.py --no-npm
 | 14:20 | 撤回送測、會議篩選與匯出 | upgrade-20261126-0559.sql |
 | 14:35 | 手冊完整版 | 無 |
 | 11-27 | 登入紀錄（含來源 IP，`auth_logs`） | upgrade-20261126-1633.sql |
+| 11-27 | 依帳號的登入限制、附件類型、顯示時再過濾 HTML、安全標頭 | upgrade-20261126-1700.sql |
 | 11-27 00:05 | 閒置 60 分鐘自動登出（54aafc7） | 無 |
 
 ---

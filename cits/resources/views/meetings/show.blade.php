@@ -157,13 +157,13 @@
                     </form>
                 @else
                     @if ($contentVisible && $m->notes_html)
-                        <div class="prose max-w-none text-sm">{!! $m->notes_html !!}</div>
+                        <div class="prose max-w-none text-sm">@richtext($m->notes_html)</div>
                     @else
                         <p class="text-sm text-slate-400">{{ $contentVisible ? '沒有補充紀錄。' : '紀錄發布後顯示。' }}</p>
                     @endif
                     @if (! $isClient && $m->internal_html)
                         <h3 class="mb-1 mt-4 text-sm font-semibold text-slate-700">內部備註 <span class="text-xs font-normal text-slate-500">（客戶看不到）</span></h3>
-                        <div class="prose max-w-none rounded bg-slate-50 p-3 text-sm">{!! $m->internal_html !!}</div>
+                        <div class="prose max-w-none rounded bg-slate-50 p-3 text-sm">@richtext($m->internal_html)</div>
                     @endif
                 @endif
             </section>

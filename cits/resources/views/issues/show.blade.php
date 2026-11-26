@@ -57,7 +57,7 @@
         <div class="space-y-4 lg:col-span-2">
             <section class="{{ $card }}">
                 <h2 class="mb-2 text-base font-semibold">內容</h2>
-                <div class="prose max-w-none text-sm">{!! $issue->content_html !!}</div>
+                <div class="prose max-w-none text-sm">@richtext($issue->content_html)</div>
             </section>
 
             <section class="{{ $card }}">
@@ -66,7 +66,7 @@
                     @forelse ($issue->addenda as $a)
                         <div class="rounded border border-slate-100 p-3 text-sm">
                             <div class="mb-1 text-xs text-slate-500"><b class="text-slate-700">{{ $a->author?->name }}</b> {{ tw($a->created_at) }}</div>
-                            <div class="prose max-w-none">{!! $a->content_html !!}</div>
+                            <div class="prose max-w-none">@richtext($a->content_html)</div>
                         </div>
                     @empty
                         <p class="text-sm text-slate-400">尚無補充說明</p>
@@ -92,7 +92,7 @@
                                 {{ $issue->tickets->firstWhere('id', $c->ticket_id)?->ticket_no }}
                                 {{ $wf->lookupLabel('comment_kind', $c->kind) }} {{ tw($c->created_at) }}
                             </div>
-                            <div class="prose max-w-none">{!! $c->content_html !!}</div>
+                            <div class="prose max-w-none">@richtext($c->content_html)</div>
                         </div>
                     @empty
                         <p class="text-sm text-slate-400">沒有客戶留言</p>
@@ -106,7 +106,7 @@
                     @forelse ($issue->comments as $c)
                         <div class="rounded border border-slate-100 p-3 text-sm">
                             <div class="mb-1 text-xs text-slate-500"><b class="text-slate-700">{{ $c->author?->name }}</b> {{ tw($c->created_at) }}</div>
-                            <div class="prose max-w-none">{!! $c->content_html !!}</div>
+                            <div class="prose max-w-none">@richtext($c->content_html)</div>
                         </div>
                     @empty
                         <p class="text-sm text-slate-400">尚無留言</p>

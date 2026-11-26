@@ -48,6 +48,7 @@
     </div>
     <div data-editor-area></div>
     <input type="file" accept="image/*" multiple class="hidden" data-image-file>
-    <input type="file" multiple class="hidden" data-attach-file>
+    @inject('attachmentRules', 'App\Services\AttachmentService')
+    <input type="file" multiple class="hidden" data-attach-file accept="{{ collect($attachmentRules->allowedExtensions())->map(fn ($e) => '.'.$e)->implode(',') }}">
     <input type="hidden" name="{{ $name }}" value="{{ $value }}" data-editor-input>
 </div>

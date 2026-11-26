@@ -33,13 +33,13 @@
                     <div><dt class="text-xs text-slate-500">接收時間</dt><dd>{{ tw($ticket->accepted_at) ?: '-' }}</dd></div>
                     <div><dt class="text-xs text-slate-500">重新提出</dt><dd>{{ $ticket->reopen_count }} 次</dd></div>
                 </dl>
-                <div class="prose max-w-none border-t border-slate-100 pt-3 text-sm">{!! $ticket->content_html !!}</div>
+                <div class="prose max-w-none border-t border-slate-100 pt-3 text-sm">@richtext($ticket->content_html)</div>
             </section>
 
             @foreach ($ticket->reopens as $r)
                 <section class="{{ $card }} border-l-4 border-red-300">
                     <h3 class="mb-1 text-sm font-semibold text-red-700">客戶提出仍有異常（第 {{ $r->round }} 次，{{ tw($r->created_at) }}）</h3>
-                    <div class="prose max-w-none text-sm">{!! $r->content_html !!}</div>
+                    <div class="prose max-w-none text-sm">@richtext($r->content_html)</div>
                 </section>
             @endforeach
 
@@ -64,7 +64,7 @@
                                         <a href="{{ route('tickets.revisions.diff', [$ticket->id, $rev->rev_no]) }}" class="ml-1 text-xs text-indigo-600 hover:underline">與前一版比較</a>
                                     @endif
                                 </summary>
-                                <div class="prose mt-2 max-w-none rounded bg-slate-50 p-3">{!! $rev->content_snapshot !!}</div>
+                                <div class="prose mt-2 max-w-none rounded bg-slate-50 p-3">@richtext($rev->content_snapshot)</div>
                             </details>
                         </li>
                     @endforeach
@@ -81,7 +81,7 @@
                                 <span>{{ app(\App\Services\WorkflowService::class)->lookupLabel('comment_kind', $c->kind) }}</span>
                                 <span>{{ tw($c->created_at) }}</span>
                             </div>
-                            <div class="prose max-w-none">{!! $c->content_html !!}</div>
+                            <div class="prose max-w-none">@richtext($c->content_html)</div>
                             @if ($canQuote && $c->author?->isClient() && $ticket->issues->isNotEmpty())
                                 <form method="POST" action="{{ route('pm.tickets.quote', $ticket->id) }}" class="mt-2 flex flex-wrap items-center gap-2">@csrf
                                     <input type="hidden" name="comment_id" value="{{ $c->id }}">

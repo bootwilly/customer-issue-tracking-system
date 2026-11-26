@@ -58,7 +58,7 @@
                         <div><dt class="text-xs text-slate-400">開立時間</dt><dd>{{ tw($ticket->created_at) }}</dd></div>
                         <div><dt class="text-xs text-slate-400">最後更新</dt><dd>{{ tw($ticket->updated_at) }}</dd></div>
                     </dl>
-                    <div class="prose prose-sm mt-4 max-w-none break-words border-t border-slate-100 pt-4">{!! $ticket->content_html !!}</div>
+                    <div class="prose prose-sm mt-4 max-w-none break-words border-t border-slate-100 pt-4">@richtext($ticket->content_html)</div>
                 </section>
 
                 @if ($ticket->revisions->count() > 1)
@@ -70,7 +70,7 @@
                             @foreach ($ticket->revisions->sortByDesc('rev_no') as $rev)
                                 <div class="rounded border border-slate-200 p-3">
                                     <div class="mb-1 text-xs text-slate-500">rev {{ $rev->rev_no }} · {{ tw($rev->created_at) }} · {{ $rev->author?->name }} · {{ $rev->title }}@if ($rev->rev_no > 1) · <a href="{{ route('tickets.revisions.diff', [$ticket->id, $rev->rev_no]) }}" class="text-indigo-600 hover:underline">與前一版比較</a>@endif</div>
-                                    <div class="prose prose-sm max-w-none break-words">{!! $rev->content_snapshot !!}</div>
+                                    <div class="prose prose-sm max-w-none break-words">@richtext($rev->content_snapshot)</div>
                                 </div>
                             @endforeach
                         </div>
@@ -84,7 +84,7 @@
                             @foreach ($ticket->reopens as $ro)
                                 <div class="rounded border border-rose-200 bg-rose-50/40 p-3">
                                     <div class="mb-1 text-xs text-slate-500">第 {{ $ro->round }} 輪 · {{ tw($ro->created_at) }} · {{ $ro->author?->name }}</div>
-                                    <div class="prose prose-sm max-w-none break-words">{!! $ro->content_html !!}</div>
+                                    <div class="prose prose-sm max-w-none break-words">@richtext($ro->content_html)</div>
                                 </div>
                             @endforeach
                         </div>
@@ -101,7 +101,7 @@
                                     <span class="rounded bg-slate-100 px-1.5">{{ $kinds[$c->kind] ?? $c->kind }}</span>
                                     <span>{{ tw($c->created_at) }}</span>
                                 </div>
-                                <div class="prose prose-sm max-w-none break-words">{!! $c->content_html !!}</div>
+                                <div class="prose prose-sm max-w-none break-words">@richtext($c->content_html)</div>
                                 @if (! empty($readers[$c->id]))
                                     <div class="mt-2 text-xs text-slate-400">已讀：{{ implode('、', $readers[$c->id]) }}</div>
                                 @endif

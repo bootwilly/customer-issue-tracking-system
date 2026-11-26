@@ -37,10 +37,13 @@ class PasswordResetService
     public function request(string $login, string $ip): bool
     {
         $key = 'pwd-forgot|'.$ip;
-        if (RateLimiter::tooManyAttempts($key, self::MAX_REQUESTS)) {
+        // per account too: the IP can be forged through the host proxy (see AuthService::attempt)
+        $accountKey = 'pwd-forgot-account|'.mb_strtolower(trim($login));
+        if (RateLimiter::tooManyAttempts($key, self::MAX_REQUESTS) || RateLimiter::tooManyAttempts($accountKey, self::MAX_REQUESTS)) {
             return false;
         }
         RateLimiter::hit($key, self::DECAY_SECONDS);
+        RateLimiter::hit($accountKey, self::DECAY_SECONDS);
 
         if (! $this->mailEnabled()) {
             return true;

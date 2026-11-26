@@ -68,17 +68,25 @@ class AuthService
         $key = mb_strtolower(trim($login)).'|'.$ip;
         $max = $this->settings->int('login.max_attempts', 5);
         $decaySeconds = $this->settings->int('login.decay_minutes', 15) * 60;
+        // The host proxy takes the client IP from a header the client controls, so the per-IP key alone can be
+        // bypassed by rotating that header. This second key counts failures per account, whatever the IP.
+        $accountKey = 'login-account|'.mb_strtolower(trim($login));
+        $accountMax = $this->settings->int('login.account_max_attempts', 10);
+        $accountDecay = $this->settings->int('login.account_decay_minutes', 15) * 60;
 
-        if (RateLimiter::tooManyAttempts($key, $max)) {
-            $minutes = (int) ceil(RateLimiter::availableIn($key) / 60);
+        foreach ([[$key, $max, null], [$accountKey, $accountMax, 'per_account']] as [$k, $limit, $detail]) {
+            if ($limit > 0 && RateLimiter::tooManyAttempts($k, $limit)) {
+                $minutes = (int) ceil(RateLimiter::availableIn($k) / 60);
 
-            return ['ok' => false, 'message' => "登入嘗試次數過多，請於 {$minutes} 分鐘後再試。", 'event' => AuthLogService::LOGIN_LOCKED, 'detail' => null];
+                return ['ok' => false, 'message' => "登入嘗試次數過多，請於 {$minutes} 分鐘後再試。", 'event' => AuthLogService::LOGIN_LOCKED, 'detail' => $detail];
+            }
         }
 
         $user = $this->users->findByLogin($login);
 
         if (! $user || ! Hash::check($password, $user->password)) {
             RateLimiter::hit($key, $decaySeconds);
+            RateLimiter::hit($accountKey, $accountDecay);
 
             return ['ok' => false, 'message' => '帳號或密碼錯誤。', 'event' => AuthLogService::LOGIN_FAIL, 'detail' => $user ? 'wrong_password' : 'unknown_user'];
         }
@@ -88,6 +96,7 @@ class AuthService
         }
 
         RateLimiter::clear($key);
+        RateLimiter::clear($accountKey);
         Auth::login($user, $remember && $this->idleMinutes() === 0);
         $this->users->touchLogin($user);
 

@@ -47,7 +47,7 @@ class AttachmentService
     {
         $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
         if ($ext === '' || ! in_array($ext, $this->allowedExtensions(), true)) {
-            throw new BusinessException('不允許的檔案類型：'.($ext === '' ? '無副檔名' : $ext));
+            throw new BusinessException('不允許的檔案類型：'.($ext === '' ? '無副檔名' : $ext).'。可上傳：'.implode('、', $this->allowedExtensions()));
         }
         if ($size <= 0) {
             throw new BusinessException('檔案是空的');

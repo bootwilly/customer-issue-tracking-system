@@ -5,6 +5,7 @@ use App\Http\Middleware\EnsureProjectSelected;
 use App\Http\Middleware\EnsureUserActive;
 use App\Http\Middleware\ForceHttps;
 use App\Http\Middleware\LogoutWhenIdle;
+use App\Http\Middleware\SecurityHeaders;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -31,6 +32,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->prependToGroup('web', ForceHttps::class);
         // Idle sign-out runs after the session starts (appended to the web group).
         $middleware->appendToGroup('web', LogoutWhenIdle::class);
+        $middleware->appendToGroup('web', SecurityHeaders::class);
         // Closures so the URL keeps the sub-path (/mescits) instead of the domain root.
         $middleware->redirectUsersTo(fn () => route('home'));
         $middleware->redirectGuestsTo(fn () => route('home'));

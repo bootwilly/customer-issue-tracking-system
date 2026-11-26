@@ -521,3 +521,14 @@
 - ip = Request::ip() (trustProxies *: rightmost X-Forwarded-For from the host proxy, Server header openresty); raw X-Forwarded-For also stored. Not yet verified on production what the proxy sends.
 - Admin page /admin/auth-logs (filter, paginate, xlsx), last 10 rows on the user edit page. Purge cits:purge-auth-logs daily 19:25 UTC, setting auth_log.keep_days 180.
 - Tests 226/226. Upgrade SQL deploy/out/upgrade-20261126-1633.sql must run BEFORE deploying the code. Not committed/deployed yet.
+
+## 2026-11-27 Editor content handling review
+- Reviewed rich-text save paths, draft cleaning, Markdown preview and attachment delivery. Normal save paths use SanitizerService. ContentService::clean still falls back to strip_tags if the sanitizer class is missing; allowed tags can retain unsafe attributes in that fallback. Recommend requiring the sanitizer or rejecting the save. Static review only; production records were not inspected.
+- DEPLOYED ae2fa59 2026-11-27 ~01:00 Asia/Taipei, snapshot snap-20261127a: tests 226/226, 7511 files written, env kept, 1 new css, manifests md5 match, 99/99 assets 200. Prod DB verified read-only: 15 migrations = repo, auth_logs columns/indexes, lookups 9/6/9, settings. Baseline deploy/out/install.sql regenerated (install-20261127.sql, 15 migrations). Smoke: /admin/auth-logs 200 admin, 403 internal/client.
+- FINDING: host proxy (openresty -> Apache) sets REMOTE_ADDR and X-Real-IP from the CLIENT-SUPPLIED X-Forwarded-For and drops the header; true peer IP is not available to PHP. Normal browsers log correctly, but IP is spoofable, and login/password-reset throttles keyed by IP can be bypassed by rotating X-Forwarded-For. forwarded_for column will stay empty. Needs host fix or per-account throttle.
+
+## 2026-11-27 Security hardening (pending SQL + deploy)
+- Per-account login throttle login-account|<login> (login.account_max_attempts 10 / account_decay_minutes 15) and per-account forgot-password throttle; detail per_account.
+- Attachment types widened via migration 2026_12_02_000100 (only replaces the old default; prod value confirmed = old default) + seed; editor file picker accept list.
+- @richtext Blade directive re-sanitizes stored HTML at render (13 places); SecurityHeaders middleware (CSP object-src none, base-uri self, frame-ancestors self, form-action self; nosniff; XFO SAMEORIGIN; Referrer-Policy); attachments (non-PDF) get CSP sandbox.
+- Tests 230/230. Upgrade SQL deploy/out/upgrade-20261126-1700.sql must run first. Prod auth_logs already has rows (logging works).

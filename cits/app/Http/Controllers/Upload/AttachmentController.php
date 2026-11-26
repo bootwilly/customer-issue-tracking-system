@@ -32,6 +32,10 @@ class AttachmentController extends Controller
             'X-Content-Type-Options' => 'nosniff',
             'Cache-Control' => str_ends_with($a->disk_path, '.md') ? 'private, no-store' : 'private, max-age=3600',
         ]);
+        // Uploaded content never runs as a page of this site. PDF is left out: Chrome's viewer refuses a sandboxed PDF.
+        if (! str_starts_with($a->mime, 'application/pdf')) {
+            $response->headers->set('Content-Security-Policy', "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; sandbox");
+        }
         $response->setContentDisposition(
             $inline ? ResponseHeaderBag::DISPOSITION_INLINE : ResponseHeaderBag::DISPOSITION_ATTACHMENT,
             $a->original_name,
