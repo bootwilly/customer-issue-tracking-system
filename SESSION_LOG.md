@@ -483,3 +483,14 @@
 ## 2026-11-26 Deployment of 10349cb
 - IN PROGRESS: 12 verified runtime/manual files. Isolated memory SQLite suite 211/211 (3764 assertions). Production rollback baseline rechecked.
 - DONE at 2026-11-26 17:20:19 Asia/Taipei. All 12 production files matched release SHA-256 on download. The extractor removed itself and the private zip. Guest login page and manifest returned 200; /dev, /issues/1 and /manual redirected guests to login. All 99 manifest assets returned 200; manifest and log listing matched pre-deploy. No production DB writes or authenticated smoke tests. Rollback files and manifest retained under %LOCALAPPDATA%/CITS/deployment-backups/10349cb.
+
+## 2026-11-26 Meeting Markdown attachments assessment
+- Code review only. Meeting notes already support multi-file selection and separate shared/internal attachment binding. The default extension list omits md and the file endpoint downloads Markdown.
+- Proposed: meeting-scoped Markdown admission and preview, reusing the existing renderer and attachment ownership. Enforce meeting visibility on both preview and original download, including for the uploader of a bound document. No new table needed for documents linked from notes.
+- No feature code, database operations, deployment or runtime verification.
+
+## 2026-11-26 Meeting Markdown documents (local feature branch)
+- Based WillyNB/meeting-markdown-documents on master 0fe1489. Meeting editors can attach multiple UTF-8 .md files in shared or internal notes. Existing attachment storage and schema are reused.
+- The document list follows saved link order and visibility. Preview and original download check current meeting access and references. Markdown preview reuses the sanitized flow renderer. Default limit: 200000 bytes, capped by the existing attachment limit.
+- Updated the meeting manual and regenerated offline HTML/PDF. Unit suite: 7 passed, 50 assertions (repository doubles and private test storage). Verified route registration, Blade compilation, subpath Vite build, and a headless Chrome fixture exercising the actual multi-file editor and preview switching with mocked upload responses.
+- No database writes, live-account test, commit, push or deployment.

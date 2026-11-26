@@ -4,9 +4,13 @@ namespace App\Http\Controllers\Meeting;
 
 use App\Exceptions\BusinessException;
 use App\Http\Controllers\Controller;
+use App\Models\Meeting;
 use App\Models\MeetingItem;
+use App\Services\AttachmentService;
 use App\Services\Export\MeetingExportService;
 use App\Services\Export\XlsxExportService;
+use App\Services\Flow\FlowRenderer;
+use App\Services\Meeting\MeetingDocuments;
 use App\Services\Meeting\MeetingService;
 use App\Support\CurrentProject;
 use Illuminate\Http\JsonResponse;
@@ -17,6 +21,7 @@ class MeetingController extends Controller
 {
     public function __construct(
         private MeetingService $svc,
+        private MeetingDocuments $documents,
         private CurrentProject $project,
         private MeetingExportService $exporter,
         private XlsxExportService $xlsx,
@@ -156,6 +161,7 @@ class MeetingController extends Controller
             'm' => $m,
             'svc' => $this->svc,
             'isClient' => ! $u->seesInternal(),
+            'documents' => $this->documents->visible($u, $m),
             'attendees' => $this->svc->attendees($m),
             'items' => $this->svc->items($u, $m),
             'comments' => $comments,
@@ -173,6 +179,53 @@ class MeetingController extends Controller
             'types' => $this->svc->types(),
             'itemStatuses' => $this->svc->itemStatuses(),
         ]);
+    }
+
+    private function documentMeeting(Request $r, int $id): Meeting
+    {
+        $pid = $this->viewer($r);
+        try {
+            return $this->svc->find($r->user(), $pid, $id);
+        } catch (BusinessException) {
+            abort(404);
+        }
+    }
+
+    public function uploadDocument(Request $r, int $id, AttachmentService $attachments)
+    {
+        $m = $this->documentMeeting($r, $id);
+        $internal = $r->boolean('internal');
+        abort_unless($this->svc->canEdit($r->user(), $m) && (! $internal || $r->user()->seesInternal()), 403);
+        $data = $r->validate(['file' => ['required', 'file'], 'internal' => ['required', 'boolean']]);
+        try {
+            $a = $attachments->storeMeetingMarkdown($r->user(), $data['file'], $this->svc->notesContext($id, $internal));
+        } catch (BusinessException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['attachment_id' => $a->id, 'name' => $a->original_name,
+            'size' => $a->size, 'url' => route('attachments.show', $a->id)]);
+    }
+
+    public function document(Request $r, int $id, int $document, AttachmentService $attachments, FlowRenderer $renderer)
+    {
+        $m = $this->documentMeeting($r, $id);
+        $a = $this->documents->visible($r->user(), $m)->firstWhere('id', $document);
+        abort_unless($a, 404);
+        $path = $attachments->absolutePath($a);
+        abort_unless($path, 404);
+        $headers = ['Cache-Control' => 'private, no-store', 'X-Content-Type-Options' => 'nosniff'];
+        if ($r->boolean('download')) {
+            return response()->file($path, $headers + ['Content-Type' => 'text/markdown'])
+                ->setContentDisposition('attachment', $a->original_name, 'document-'.$document.'.md');
+        }
+        try {
+            $html = $renderer->render($attachments->readMarkdown($path));
+        } catch (BusinessException $e) {
+            abort(422, $e->getMessage());
+        }
+
+        return response()->view('meetings.document', ['html' => $html, 'title' => $a->original_name], 200, $headers);
     }
 
     public function edit(Request $r, int $id)

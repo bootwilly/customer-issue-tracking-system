@@ -196,6 +196,35 @@ class AttachmentService
         ]);
     }
 
+    public function storeMeetingMarkdown(User $user, UploadedFile $file, string $context): Attachment
+    {
+        $path = $file->getRealPath();
+        $name = $file->getClientOriginalName();
+        if (strtolower(pathinfo($name, PATHINFO_EXTENSION)) !== 'md' || mb_strlen($name) > 255) {
+            throw new BusinessException('請選擇檔名不超過 255 字元的 .md 文件。');
+        }
+        $this->readMarkdown($path);
+
+        return $this->persist($user, $path, $name, 'text/markdown', $context);
+    }
+
+    public function readMarkdown(string $path): string
+    {
+        $limit = min($this->maxBytes(), (int) config('meeting.markdown_max_bytes'));
+        if ($limit <= 0 || filesize($path) > $limit) {
+            throw new BusinessException('Markdown 文件超過大小上限 '.number_format($limit).' bytes。');
+        }
+        $text = file_get_contents($path);
+        if ($text !== false && str_starts_with($text, "\xEF\xBB\xBF")) {
+            $text = substr($text, 3);
+        }
+        if ($text === false || trim($text) === '' || str_contains($text, "\0") || ! mb_check_encoding($text, 'UTF-8')) {
+            throw new BusinessException('請上傳有內容的 UTF-8 Markdown 文字檔。');
+        }
+
+        return str_replace(["\r\n", "\r"], "\n", $text);
+    }
+
     public function find(int $id): ?Attachment
     {
         return $this->attachments->find($id);
@@ -208,10 +237,11 @@ class AttachmentService
 
     public function canView(User $user, Attachment $a): bool
     {
-        if ($user->is_admin) {
+        $meetingFile = $a->state === 'bound' && in_array($a->owner_type, ['meeting', 'meeting_internal'], true);
+        if ($user->is_admin && ! $meetingFile) {
             return true;
         }
-        if ($a->uploaded_by === $user->id) {
+        if (! $meetingFile && $a->uploaded_by === $user->id) {
             return true;
         }
         if ($a->state !== 'bound' || ! $a->owner_type || ! $a->owner_id) {
@@ -225,7 +255,7 @@ class AttachmentService
         }
         $projectId = $this->attachments->projectIdForOwner($a->owner_type, (int) $a->owner_id);
 
-        return $projectId !== null && $this->attachments->isProjectMember($user->id, $projectId);
+        return $projectId !== null && ($user->is_admin || $this->attachments->isProjectMember($user->id, $projectId));
     }
 
     /** 儲存成功後呼叫：綁定 html 內引用的暫存附件，刪除同 context 未引用者 */
@@ -239,7 +269,7 @@ class AttachmentService
         preg_match_all('/data-attachment-id="(\d+)"|\/attachments\/(\d+)/', $html, $m);
         $ids = array_values(array_unique(array_map('intval', array_filter(array_merge($m[1], $m[2])))));
 
-        $this->attachments->bindTemp($ids, $userId, $ownerType, $ownerId);
+        $this->attachments->bindTemp($ids, $userId, $ownerType, $ownerId, $context);
         $this->deleteTemp($this->attachments->tempByContext($userId, $context)->filter(fn ($a) => ! in_array($a->id, $ids, true)));
     }
 

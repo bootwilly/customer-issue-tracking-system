@@ -20,6 +20,13 @@ class AttachmentRepository
         return Attachment::query()->find($id);
     }
 
+    public function boundMarkdown(int $meetingId, string $ownerType, array $ids): Collection
+    {
+        return Attachment::query()->where('state', 'bound')->where('owner_type', $ownerType)
+            ->where('owner_id', $meetingId)->where('disk_path', 'like', '%.md')
+            ->whereIntegerInRaw('id', $ids)->get()->keyBy('id');
+    }
+
     public function create(array $data): Attachment
     {
         return Attachment::query()->create($data);
@@ -63,13 +70,23 @@ class AttachmentRepository
     }
 
     /** @param list<int> $ids */
-    public function bindTemp(array $ids, int $userId, string $ownerType, int $ownerId): void
+    public function bindTemp(array $ids, int $userId, string $ownerType, int $ownerId, string $context): void
     {
         if ($ids === []) {
             return;
         }
         Attachment::query()->whereIn('id', $ids)
             ->where('state', 'temp')->where('uploaded_by', $userId)
+            ->where(function ($q) use ($context, $ownerType, $ownerId) {
+                $q->where('mime', '!=', 'text/markdown')->orWhere('disk_path', 'not like', '%.md')
+                    ->orWhereNull('draft_context_key')->orWhere('draft_context_key', 'not like', 'meeting:%');
+                if (in_array($ownerType, ['meeting', 'meeting_internal'], true)) {
+                    $expected = 'meeting:'.($ownerType === 'meeting' ? 'notes' : 'internal').':'.$ownerId;
+                    if ($context === $expected) {
+                        $q->orWhere('draft_context_key', $expected);
+                    }
+                }
+            })
             ->update(['state' => 'bound', 'owner_type' => $ownerType, 'owner_id' => $ownerId, 'updated_at' => now()]);
     }
 

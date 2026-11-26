@@ -135,6 +135,27 @@
                 @endif
             </section>
 
+            @if ($documents->isNotEmpty())
+                <section class="{{ $card }}" x-data="{ selected: '' }">
+                    <h2 class="mb-2 text-base font-semibold">Markdown 文件</h2>
+                    <ul class="space-y-1">
+                        @foreach ($documents as $document)
+                            @php($url = route('meetings.documents.show', [$m->id, $document->id]))
+                            <li>
+                                <a class="text-indigo-700 underline" href="{{ $url }}" @click.prevent="selected = $el.href">{{ $document->original_name }}</a>
+                                @if ($document->owner_type === 'meeting_internal')
+                                    <span class="text-xs text-slate-500">內部備註</span>
+                                @endif
+                                <a class="ml-2 text-sm underline" href="{{ $url }}?download=1" aria-label="下載 {{ $document->original_name }}">下載</a>
+                            </li>
+                        @endforeach
+                    </ul>
+                    <template x-if="selected">
+                        <iframe title="Markdown 文件預覽" class="mt-3 h-96 w-full rounded border" :src="selected"></iframe>
+                    </template>
+                </section>
+            @endif
+
             @include('meetings._comments')
         </div>
 

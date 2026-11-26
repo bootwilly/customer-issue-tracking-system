@@ -212,20 +212,33 @@ function init(root) {
         setStatus('');
     }
 
+    async function uploadChunks(file) {
+        const init = await api('/uploads/init', { json: { name: file.name, size: file.size, context } });
+        const cs = init.chunk_size || CHUNK_SIZE_FALLBACK;
+        const total = Math.ceil(file.size / cs);
+        for (let i = 0; i < total; i++) {
+            const fd = new FormData();
+            fd.append('index', i);
+            fd.append('chunk', file.slice(i * cs, (i + 1) * cs), `${i}.part`);
+            await api(`/uploads/${init.id}/chunk`, { body: fd });
+            setStatus(`上傳中 ${Math.round(((i + 1) / total) * 100)}%`);
+        }
+        return api(`/uploads/${init.id}/complete`);
+    }
+
     async function uploadFile(file) {
         try {
             setStatus('準備上傳 0%');
-            const init = await api('/uploads/init', { json: { name: file.name, size: file.size, context } });
-            const cs = init.chunk_size || CHUNK_SIZE_FALLBACK;
-            const total = Math.ceil(file.size / cs);
-            for (let i = 0; i < total; i++) {
+            const meeting = /^meeting:(notes|internal):([0-9]+)$/.exec(context);
+            let r;
+            if (meeting && /\.md$/i.test(file.name)) {
                 const fd = new FormData();
-                fd.append('index', i);
-                fd.append('chunk', file.slice(i * cs, (i + 1) * cs), `${i}.part`);
-                await api(`/uploads/${init.id}/chunk`, { body: fd });
-                setStatus(`上傳中 ${Math.round(((i + 1) / total) * 100)}%`);
+                fd.append('file', file);
+                fd.append('internal', meeting[1] === 'internal' ? '1' : '0');
+                r = await api('/meetings/' + meeting[2] + '/documents', { body: fd });
+            } else {
+                r = await uploadChunks(file);
             }
-            const r = await api(`/uploads/${init.id}/complete`);
             editor
                 .chain()
                 .focus()
@@ -236,6 +249,7 @@ function init(root) {
             setStatus('');
         } catch (e) {
             setStatus(e.message, true);
+            return file.name + '：' + e.message;
         }
     }
 
@@ -350,8 +364,24 @@ function init(root) {
         e.target.value = '';
     });
     root.querySelector('[data-attach-file]').addEventListener('change', async (e) => {
-        for (const f of Array.from(e.target.files)) await uploadFile(f);
-        e.target.value = '';
+        const files = Array.from(e.target.files);
+        const form = root.closest('form');
+        const errors = [];
+        const waitForUpload = (event) => {
+            event.preventDefault();
+            setStatus('附件上傳中，請稍候再儲存。', true);
+        };
+        form?.addEventListener('submit', waitForUpload);
+        try {
+            for (const file of files) {
+                const error = await uploadFile(file);
+                if (error) errors.push(error);
+            }
+            if (errors.length) setStatus(errors.join('；'), true);
+        } finally {
+            form?.removeEventListener('submit', waitForUpload);
+            e.target.value = '';
+        }
     });
 
     function refreshToolbar() {
