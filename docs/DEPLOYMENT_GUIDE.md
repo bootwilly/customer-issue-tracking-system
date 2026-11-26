@@ -85,7 +85,8 @@
 
 ### 3.1 install SQL 的注意事項
 - 只能在**空的資料庫**執行，因為它用 `CREATE TABLE` 和一般的 `INSERT`，表或資料已存在就會失敗。
-- 裡面有初始管理員帳號 `admin`，密碼是產生 SQL 時 `ADMIN_PASSWORD.local.txt` 的內容（存的是雜湊）。**第一次登入後請立即改密碼**；這個檔案不能外流。
+- 裡面有初始管理員帳號 `admin`，密碼是產生 SQL 時環境變數 `ADMIN_INITIAL_PASSWORD` 的值（SQL 裡存的是雜湊）。**沒有設這個變數就不會有管理員帳號，裝好後會沒辦法登入。** 第一次登入後請立即改密碼，產生出來的 SQL 不要外流，也不要放進 git（`deploy/out/` 已被忽略）。
+- **這個檔案不在 repo 裡**，下載專案的人要照 3.2 自己產生，每個人產生的管理員密碼不同。
 - 檔案開頭有 `SET FOREIGN_KEY_CHECKS = 0`，結尾設回 1。
 - migration 裡的資料更新語法（例如把 `meeting_it` 改成 `meeting_item`、送測必填 Test）在空資料庫上會更新 0 筆，沒有影響；種子資料本來就是最新的值。
 
@@ -95,7 +96,8 @@
 cd D:/Project/Customer_Issue_Tracking_System
 : > /tmp/install-final.sqlite
 export DB_CONNECTION=sqlite DB_DATABASE=/tmp/install-final.sqlite
-export ADMIN_INITIAL_PASSWORD="$(tr -d '\r\n' < ADMIN_PASSWORD.local.txt)"   # 不要 echo 出來
+export ADMIN_INITIAL_PASSWORD='<自訂的管理員密碼>'   # 必填：沒設就不會建立 admin 帳號
+# （原作者是從 git 忽略的 ADMIN_PASSWORD.local.txt 讀取：export ADMIN_INITIAL_PASSWORD="$(tr -d '\r\n' < ADMIN_PASSWORD.local.txt)"）
 (cd cits && php artisan migrate --seed --force)
 php deploy/make_install_sql.php          # 輸出到 deploy/out/install.sql
 unset ADMIN_INITIAL_PASSWORD
@@ -132,9 +134,15 @@ cp deploy/out/install.sql deploy/out/install-$(date +%Y%m%d).sql
 1. **先確認正式站已套用到哪一個 migration**：看 `SESSION_LOG.md`，或用唯讀腳本查 `SELECT migration, batch FROM migrations ORDER BY id`（範本見附錄 B）。
 2. **產生 SQL**：
    ```bash
-   php deploy/make_upgrade_sql.php --applied=<不在 install.sql 裡、但正式站已經套用的 migration 名稱，逗號分隔>
+   php deploy/make_upgrade_sql.php                                   # 用 deploy/out/install.sql 當基準
+   php deploy/make_upgrade_sql.php --no-baseline --applied-file=applied.txt   # 最可靠：以正式站實際的清單為準
    ```
-   - `install.sql` 已更新成 2026-11-26 的最終版，所以目前**不用帶 `--applied`**，新的 migration 都會被視為待套用。
+   - 程式需要知道「正式站已經套用了哪些 migration」，來源有三種，可以合併使用：
+     1. `deploy/out/install.sql`（`make_install_sql.php` 產生）。**這個檔案不在 repo 裡**，只有自己產生過才有。
+     2. `--applied-file=<檔案>`：在 phpMyAdmin 執行 `SELECT migration FROM migrations ORDER BY id;`，把結果匯出或複製成文字檔，一行一個名稱。程式會自動抓出 migration 名稱，多出來的標題或引號都沒關係。
+     3. `--applied=a,b,...`：直接列名稱。
+   - 三種都沒有的話，程式會停下來，並提示你去查 migrations 表。
+   - 原作者的 `install.sql` 已更新成 2026-11-26 的最終版，和正式站一致，所以原作者目前直接執行就可以。
    - 輸出到 `deploy/out/upgrade-<日期時間>.sql`，內容包括：
      - 待套用 migration 的 DDL
      - 對應的 migration 紀錄

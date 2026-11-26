@@ -9,7 +9,11 @@
  *    (unique keys make it safe to run twice; existing rows are never changed).
  * The user executes the SQL in phpMyAdmin. AI never changes the production database.
  *
- * Usage: php deploy/make_upgrade_sql.php [--applied=name1,name2]
+ * Usage: php deploy/make_upgrade_sql.php [--applied=name1,name2] [--applied-file=path] [--no-baseline]
+ *  --applied-file: text file with one migration name per line (e.g. the result of
+ *                  "SELECT migration FROM migrations" exported from phpMyAdmin). Most reliable source.
+ *  --no-baseline:  ignore deploy/out/install.sql (use only --applied / --applied-file).
+ * deploy/out/install.sql is created by make_install_sql.php; it is NOT in the repository.
  */
 
 use Illuminate\Database\Connection;
@@ -37,16 +41,33 @@ config(['database.connections.pretend' => [
 $conn = DB::connection('pretend');
 
 // ---- applied migrations ----
-$install = @file_get_contents(__DIR__.'/out/install.sql') ?: throw new RuntimeException('deploy/out/install.sql not found (baseline).');
-preg_match_all("/INSERT INTO `migrations` \\(`id`, `migration`, `batch`\\) VALUES \\(\\d+, '([^']+)'/", $install, $m);
-$applied = $m[1];
+$applied = [];
+$baseline = __DIR__.'/out/install.sql';
+if (! in_array('--no-baseline', $argv, true) && is_file($baseline)) {
+    preg_match_all("/INSERT INTO `migrations` \\(`id`, `migration`, `batch`\\) VALUES \\(\\d+, '([^']+)'/", (string) file_get_contents($baseline), $m);
+    $applied = $m[1];
+}
 foreach ($argv as $a) {
     if (str_starts_with($a, '--applied=')) {
         $applied = array_merge($applied, array_filter(explode(',', substr($a, 10))));
     }
+    if (str_starts_with($a, '--applied-file=')) {
+        $path = substr($a, 15);
+        $lines = is_file($path) ? file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) : throw new RuntimeException("--applied-file not found: $path");
+        foreach ($lines as $line) {
+            if (preg_match('/\d{4}_\d{2}_\d{2}_\d{6}_[a-z0-9_]+/', $line, $mm)) {
+                $applied[] = $mm[0];
+            }
+        }
+    }
 }
+$applied = array_values(array_unique($applied));
 if (! $applied) {
-    throw new RuntimeException('No baseline migrations found in install.sql.');
+    fwrite(STDERR, "No applied migrations known.\n"
+        ."Run on the production DB (phpMyAdmin): SELECT migration FROM migrations ORDER BY id;\n"
+        ."save the result as a text file and pass --applied-file=<file>, or pass --applied=a,b,...\n"
+        ."(deploy/out/install.sql from make_install_sql.php is also used when present.)\n");
+    exit(1);
 }
 
 $files = glob($root.'/database/migrations/*.php');

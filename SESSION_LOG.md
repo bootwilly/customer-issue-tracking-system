@@ -461,3 +461,8 @@
 - Pending user decision: project LICENSE (MIT/Apache-2.0/AGPL/none) + copyright holder; THIRD_PARTY_NOTICES.md generation; amend into the initial commit.
 - Licensing done (not committed yet): LICENSE (Apache-2.0), NOTICE (holder placeholder "The CITS Authors"), composer.json license Apache-2.0, THIRD_PARTY_NOTICES.md (162 browser-bundled npm pkgs from package-lock closure of alpinejs/mermaid/@tiptap/* + tailwindcss; 82 prod composer pkgs), licenses/THIRD_PARTY_LICENSES_{JS,PHP}.txt (texts from local node_modules/vendor; MIT text added for alpinejs/fastdom/strictdom which ship none). AGENT_DEPLOY.md for public users (local / VPS / cPanel routes).
 - Regenerate notices after dependency upgrades (THIRD_PARTY_NOTICES.md section 8).
+
+## 2026-11-26 Published to GitHub
+- Public repo https://github.com/bootwilly/customer-issue-tracking-system (branch master, single commit 4ba620c). Author set repo-locally to bootwilly <id+bootwilly@users.noreply.github.com>; NOTICE copyright "2026 bootwilly". Pre-push scan: no real domain / cPanel user / local paths / personal email in tracked files.
+- Remote: origin (https). Future pushes only when the user says so.
+- Portability fixes (not committed): build.py app_dir config (CITS_APP_DIR, default app/mescits), ASSET_URL derived from app_url path, cross-platform npm; make_upgrade_sql.php baseline optional + --applied-file / --no-baseline; docs no longer depend on ADMIN_PASSWORD.local.txt; root README.md (architecture, deployment routes, license notes).

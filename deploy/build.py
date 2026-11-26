@@ -1,7 +1,8 @@
 """
 Build deploy artifacts into deploy/out/:
-  app.zip         Laravel core (no dev deps, no tests, no node_modules) -> extracted to ~/app/mescits
-  public/         contents of Laravel public/ with index.php pointing to ../../app/mescits -> ~/public_html/mescits
+  app.zip         Laravel core (no dev deps, no tests, no node_modules) -> extracted to ~/<app_dir> (default app/mescits)
+  public/         contents of Laravel public/ with index.php pointing to ../../<app_dir> -> ~/public_html/<sub>
+                  (the public dir must be exactly two levels below the home dir, e.g. ~/public_html/mescits)
   x_<rand>.php    one-shot self-deleting extractor (token protected) uploaded to public dir
   env.production  .env template (DB_PASSWORD left for the user); extractor installs it only if no .env exists
   --drawio        also build drawio.zip + xd_<rand>.php (self-hosted draw.io, ~3000 files, pinned version in
@@ -17,7 +18,7 @@ OUT = ROOT / "deploy" / "out"
 STAGE = OUT / "stage"
 # Machine / site specific values live in deploy/deploy.local.json (git-ignored) or env vars:
 #   {"php": "...php.exe", "composer": "...composer.phar", "app_url": "https://example.com/mescits",
-#    "db_database": "cpuser_mescits", "db_username": "cpuser_mescits"}
+#    "db_database": "cpuser_mescits", "db_username": "cpuser_mescits", "app_dir": "app/mescits"}
 import json as _json
 _LOCAL = Path(__file__).resolve().parent / "deploy.local.json"
 _CFG = _json.loads(_LOCAL.read_text(encoding="utf-8")) if _LOCAL.exists() else {}
@@ -28,6 +29,10 @@ COMPOSER = _cfg("composer", "CITS_COMPOSER", "composer.phar")
 APP_URL = _cfg("app_url", "CITS_APP_URL", "https://example.com/mescits")
 DB_DATABASE = _cfg("db_database", "CITS_DB_DATABASE", "cpuser_mescits")
 DB_USERNAME = _cfg("db_username", "CITS_DB_USERNAME", "cpuser_mescits")
+APP_DIR = _cfg("app_dir", "CITS_APP_DIR", "app/mescits").strip("/")  # core dir relative to the home dir
+assert all(part not in ("", ".", "..") for part in APP_DIR.split("/")), "app_dir must be a plain relative path"
+_URL_PATH = (APP_URL.split("://", 1)[-1].split("/", 1) + [""])[1].strip("/")
+ASSET_URL = "/" + _URL_PATH if _URL_PATH else ""  # Vite base path = sub directory of APP_URL
 
 EXCLUDE_TOP = {"node_modules", "vendor", "tests", ".git", "public", ".env", ".env.example", "phpunit.xml",
                "CLAUDE.md", "AGENTS.md", ".phpunit.result.cache", "package.json", "package-lock.json",
@@ -127,10 +132,10 @@ def build_public():
         shutil.rmtree(pub)
     shutil.copytree(SRC / "public", pub, ignore=lambda d, names: [n for n in names if n in ("hot", "storage") or (n == "drawio" and Path(d) == SRC / "public")])
     idx = (pub / "index.php").read_text(encoding="utf-8")
-    idx = idx.replace("__DIR__.'/../storage/framework/maintenance.php'", "__DIR__.'/../../app/mescits/storage/framework/maintenance.php'")
-    idx = idx.replace("__DIR__.'/../vendor/autoload.php'", "__DIR__.'/../../app/mescits/vendor/autoload.php'")
-    idx = idx.replace("__DIR__.'/../bootstrap/app.php'", "__DIR__.'/../../app/mescits/bootstrap/app.php'")
-    assert idx.count("app/mescits") == 3, "index.php patch failed"
+    idx = idx.replace("__DIR__.'/../storage/framework/maintenance.php'", f"__DIR__.'/../../{APP_DIR}/storage/framework/maintenance.php'")
+    idx = idx.replace("__DIR__.'/../vendor/autoload.php'", f"__DIR__.'/../../{APP_DIR}/vendor/autoload.php'")
+    idx = idx.replace("__DIR__.'/../bootstrap/app.php'", f"__DIR__.'/../../{APP_DIR}/bootstrap/app.php'")
+    assert idx.count(f"../../{APP_DIR}/") == 3, "index.php patch failed"
     idx = idx.replace("$app->handleRequest(Request::capture());", "$app->usePublicPath(__DIR__);\n\n$app->handleRequest(Request::capture());")
     assert "usePublicPath" in idx
     (pub / "index.php").write_text(idx, encoding="utf-8", newline="\n")
@@ -152,7 +157,7 @@ header('Content-Type: text/plain; charset=utf-8');
 if (!hash_equals('__TOKEN__', (string)($_GET['t'] ?? ''))) { http_response_code(404); exit; }
 @set_time_limit(300);
 $home = dirname(__DIR__, 2);
-$app = "$home/app/mescits";
+$app = "$home/__APP_DIR__";
 $zipPath = "$app/app.zip";
 $out = [];
 if (!is_file($zipPath)) { echo "app.zip not found\n"; @unlink(__FILE__); exit; }
@@ -182,7 +187,7 @@ $out[] = 'env kept = ' . ($keepEnv ? 'yes' : 'no');
 $out[] = 'zip deleted = ' . (@unlink($zipPath) ? 'yes' : 'NO');
 $out[] = 'self deleted = ' . (@unlink(__FILE__) ? 'yes' : 'NO');
 echo implode("\n", $out), "\n";
-""".replace("__TOKEN__", token)
+""".replace("__TOKEN__", token).replace("__APP_DIR__", APP_DIR)
     (OUT / name).write_text(php, encoding="utf-8", newline="\n")
     (OUT / "extractor.txt").write_text(f"{name}\n{token}\n", encoding="utf-8")
     print("extractor", name)
@@ -238,7 +243,7 @@ echo 'self deleted = ' . (@unlink(__FILE__) ? 'yes' : 'NO') . "\n";
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
     # ASSET_URL: vite base must include the sub-path, otherwise dynamic chunks (mermaid) load from /build and 404
-    run(["npm.cmd", "run", "build"], SRC, env={**os.environ, "ASSET_URL": "/mescits"}) if "--no-npm" not in sys.argv else None
+    run(["npm.cmd" if os.name == "nt" else "npm", "run", "build"], SRC, env={**os.environ, "ASSET_URL": ASSET_URL}) if "--no-npm" not in sys.argv else None
     copy_app()
     build_zip()
     build_public()

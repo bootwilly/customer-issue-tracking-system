@@ -152,17 +152,28 @@ php artisan optimize:clear
 1. **目錄分開**：
    - `~/public_html/<子目錄>` 只放 `cits/public` 的內容；
    - Laravel 核心放在 `~/app/<名稱>`，必須在 public_html 之外。
-   - `deploy/build.py` 產生的 `public/index.php` 會自動改成載入 `../../app/mescits/...`。**如果你的目錄名稱不同，要修改 `build.py` 裡的 `app/mescits`。**
+   - 公開目錄必須剛好在家目錄下兩層（例如 `~/public_html/cits`）。`deploy/build.py` 產生的 `public/index.php` 會載入 `../../<app_dir>/...`；`app_dir` 在下一步的設定檔裡設定（預設 `app/mescits`）。
 2. **本機設定**：建立 `deploy/deploy.local.json`（這個檔案不進 git）：
    ```json
    {"php": "C:\\path\\to\\php.exe", "composer": "C:\\path\\to\\composer.phar",
-    "app_url": "https://example.com/mescits", "db_database": "cpuser_mescits", "db_username": "cpuser_mescits"}
+    "app_url": "https://example.com/cits", "db_database": "cpuser_cits", "db_username": "cpuser_cits",
+    "app_dir": "app/cits"}
    ```
-   也可以改用環境變數 `CITS_PHP`、`CITS_COMPOSER`、`CITS_APP_URL`、`CITS_DB_DATABASE`、`CITS_DB_USERNAME`。
-3. **資料庫**：用 `php deploy/make_install_sql.php` 產生 `deploy/out/install.sql`（做法見 DEPLOYMENT_GUIDE 3.2），在 phpMyAdmin **選好空的資料庫**後執行。
+   - 也可以改用環境變數 `CITS_PHP`、`CITS_COMPOSER`、`CITS_APP_URL`、`CITS_DB_DATABASE`、`CITS_DB_USERNAME`、`CITS_APP_DIR`。
+   - `app_url` 的子目錄會自動當作前端資源的路徑（`ASSET_URL`）。
+3. **資料庫**：repo **沒有附**現成的 SQL 檔，因為它會帶有管理員密碼。請自己產生：
+   ```bash
+   : > /tmp/cits-install.sqlite
+   export DB_CONNECTION=sqlite DB_DATABASE=/tmp/cits-install.sqlite ADMIN_INITIAL_PASSWORD='<自訂密碼>'
+   (cd cits && php artisan migrate --seed --force)
+   php deploy/make_install_sql.php           # 產生 deploy/out/install.sql
+   ```
+   - 在 phpMyAdmin **選好空的資料庫**後執行 `deploy/out/install.sql`。
+   - 沒設 `ADMIN_INITIAL_PASSWORD` 就不會有 admin 帳號。
+   - 以後升級時，用 `php deploy/make_upgrade_sql.php --no-baseline --applied-file=<正式站 migrations 清單>` 產生升級 SQL，詳見 DEPLOYMENT_GUIDE 第 5 節。
 4. **打包**：
    ```bash
-   cd cits && ASSET_URL=/<子目錄> npm run build
+   cd cits && ASSET_URL=/<子目錄> npm run build     # 也可以不加 --no-npm，讓 build.py 依 app_url 自動建置
    cd .. && python deploy/build.py --no-npm
    ```
    輸出：`deploy/out/app.zip`、`deploy/out/public/`、一次性的解壓程式 `x_*.php`，以及寫著解壓程式檔名和 token 的 `extractor.txt`。
