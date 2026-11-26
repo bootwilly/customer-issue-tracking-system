@@ -479,3 +479,7 @@
 - Verified rollback copies of all 12 affected production files. No production files were uploaded or changed.
 - With the authorized isolated SQLite memory database and test-only settings, the exact commit passed 210/211 tests. ProgressPackageTest line 194 matched the frozen package name in the preceding flash error instead of checking package options.
 - Verified the actual package selector excluded the frozen package and included the open package. A temporary assertion scoped to option labels passed all 7 ProgressPackageTest cases (125 assertions). Restored the snapshot test. Production release awaits a decision on the failing committed test.
+
+## 2026-11-26 Deployment of 10349cb
+- IN PROGRESS: 12 verified runtime/manual files. Isolated memory SQLite suite 211/211 (3764 assertions). Production rollback baseline rechecked.
+- DONE at 2026-11-26 17:20:19 Asia/Taipei. All 12 production files matched release SHA-256 on download. The extractor removed itself and the private zip. Guest login page and manifest returned 200; /dev, /issues/1 and /manual redirected guests to login. All 99 manifest assets returned 200; manifest and log listing matched pre-deploy. No production DB writes or authenticated smoke tests. Rollback files and manifest retained under %LOCALAPPDATA%/CITS/deployment-backups/10349cb.
