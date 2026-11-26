@@ -1,0 +1,21 @@
+CITS - Customer Issue Tracking System
+Copyright 2026 bootwilly
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes third-party software:
+
+- draw.io v32.7.4 (cits/public/drawio/), Copyright (c) JGraph Ltd,
+  licensed under the Apache License, Version 2.0 (cits/public/drawio/LICENSE).
+  Modified by CITS: js/PreConfig.js (lines marked CITS); WEB-INF, META-INF and *.map removed.
+  - libavoid-js (cits/public/drawio/js/libavoid-js/): GNU LGPL 2.1, unmodified, kept as a separate file.
+  - draw.io templates (cits/public/drawio/templates/): Creative Commons Attribution 4.0 (CC BY 4.0).
+  - draw.io icon sets and stencil libraries (img/, shapes/, stencils/): may not be used in, distributed
+    with or incorporated into Atlassian products or the Atlassian marketplace without written permission
+    from JGraph Ltd; diagrams exported by end users are not restricted.
+
+- PHP packages (composer) and JavaScript/CSS packages (npm) under MIT, ISC, BSD, Apache-2.0 and
+  similar permissive licenses. Elections: nette/schema and nette/utils are used under BSD-3-Clause;
+  DOMPurify is used under Apache-2.0.
+
+Full list, conditions and license texts: THIRD_PARTY_NOTICES.md and the licenses/ directory.

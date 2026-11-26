@@ -1,0 +1,14 @@
+{
+    "README": "all",
+    "01-getting-started": "all",
+    "02-workflow": "all",
+    "03-client": "all",
+    "04-pm": "internal",
+    "05-dev": "internal",
+    "06-test": "internal",
+    "07-common": "all",
+    "08-project-admin": "internal",
+    "09-system-admin": "admin",
+    "10-troubleshooting": "all",
+    "11-meetings": "all"
+}

@@ -1,0 +1,14 @@
+ADMIN_PASSWORD.local.txt
+*.local.txt
+deploy/out/
+
+# local-only
+cits/database/*.sqlite
+cits/database/*.sqlite-journal
+.claude/settings.local.json
+
+# private deploy values (real domain, cPanel user, local paths)
+deploy/deploy.local.json
+*.local.md
+.claude/launch.json
+__pycache__/

@@ -1,0 +1,26 @@
+@import 'tailwindcss';
+
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../storage/framework/views/*.php';
+
+@theme {
+    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
+        'Segoe UI Symbol', 'Noto Color Emoji';
+}
+
+/* CITS: keep table headers, badges and short cells on one line */
+@layer base {
+    th { white-space: nowrap; }
+}
+@layer utilities {
+    .badge, td:has(> .badge) { white-space: nowrap; }
+}
+
+/* CITS: tables in rich-text content (editor and rendered tickets / issues) */
+@layer components {
+    .prose table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; margin: 0.5rem 0; font-size: 0.875rem; }
+    .prose th, .prose td { border: 1px solid #cbd5e1; padding: 0.25rem 0.5rem; vertical-align: top; min-width: 3rem; white-space: normal; }
+    .prose th { background: #f8fafc; font-weight: 600; text-align: left; }
+    .prose th > p, .prose td > p { margin: 0; }
+    .prose .selectedCell { background: #e0e7ff; }
+}

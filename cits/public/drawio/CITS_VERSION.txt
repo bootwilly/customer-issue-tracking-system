@@ -1,0 +1,1 @@
+v32.7.4 from https://github.com/jgraph/drawio/releases/download/v32.7.4/draw.war (sha256 caf784637155f444e0b6fb7c154cae5dbad27cfc31cb16286054d43f996be42f). Excluded WEB-INF, META-INF, *.map. Patched js/PreConfig.js (CITS lines).
