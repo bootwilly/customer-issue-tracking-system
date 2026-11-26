@@ -515,3 +515,9 @@
 - No SQL needed on production (code default). Use now()->getTimestamp() not time() so tests can travel().
 - Tests 221/221. Not yet committed/deployed.
 - DEPLOYED 54aafc7 2026-11-27 ~00:05 Asia/Taipei, snapshot snap-20261126z: tests 221/221, app.zip 7509 files (7502 written, env kept), 1 new css asset, manifests md5 match, 99/99 assets 200, 4 remote files md5 match snapshot. Smoke: admin/internal/client codes as expected, layout timer present; idle probe (session idle.last_at = now-61min) redirected to login and session was invalidated. Logs unchanged. No SQL.
+
+## 2026-11-27 Auth logs (login IP audit)
+- Table auth_logs (migration 2026_12_01_000100), AuthLogService/Repository, events in lookup auth_log_event/auth_log_detail, export columns export_auth_logs.
+- ip = Request::ip() (trustProxies *: rightmost X-Forwarded-For from the host proxy, Server header openresty); raw X-Forwarded-For also stored. Not yet verified on production what the proxy sends.
+- Admin page /admin/auth-logs (filter, paginate, xlsx), last 10 rows on the user edit page. Purge cits:purge-auth-logs daily 19:25 UTC, setting auth_log.keep_days 180.
+- Tests 226/226. Upgrade SQL deploy/out/upgrade-20261126-1633.sql must run BEFORE deploying the code. Not committed/deployed yet.

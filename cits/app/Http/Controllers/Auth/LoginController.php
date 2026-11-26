@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Http\Middleware\LogoutWhenIdle;
+use App\Services\AuthLogService;
 use App\Services\AuthService;
 use App\Support\CurrentProject;
 use Illuminate\Http\Request;
@@ -11,7 +12,7 @@ use Illuminate\Support\Facades\Auth;
 
 class LoginController extends Controller
 {
-    public function __construct(private AuthService $auth, private CurrentProject $current) {}
+    public function __construct(private AuthService $auth, private CurrentProject $current, private AuthLogService $authLog) {}
 
     public function store(Request $request)
     {
@@ -21,6 +22,8 @@ class LoginController extends Controller
         ], [], ['login' => '帳號或 Email', 'password' => '密碼']);
 
         $result = $this->auth->attempt($data['login'], $data['password'], (string) $request->ip(), $request->boolean('remember'));
+
+        $this->authLog->record($request, $result['event'], $result['ok'] ? $request->user() : null, $data['login'], $result['detail']);
 
         if (! $result['ok']) {
             return back()->withInput($request->only('login'))->with('err', $result['message']);
@@ -48,6 +51,7 @@ class LoginController extends Controller
 
     public function destroy(Request $request)
     {
+        $this->authLog->record($request, AuthLogService::LOGOUT, $request->user());
         Auth::logout();
         $request->session()->invalidate();
         $request->session()->regenerateToken();

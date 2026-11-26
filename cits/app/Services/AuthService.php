@@ -62,7 +62,7 @@ class AuthService
         return max(0, $this->settings->int('session.idle_minutes', 60));
     }
 
-    /** @return array{ok: bool, message: ?string} */
+    /** @return array{ok: bool, message: ?string, event: string, detail: ?string} event/detail: AuthLogService codes */
     public function attempt(string $login, string $password, string $ip, bool $remember = false): array
     {
         $key = mb_strtolower(trim($login)).'|'.$ip;
@@ -72,7 +72,7 @@ class AuthService
         if (RateLimiter::tooManyAttempts($key, $max)) {
             $minutes = (int) ceil(RateLimiter::availableIn($key) / 60);
 
-            return ['ok' => false, 'message' => "登入嘗試次數過多，請於 {$minutes} 分鐘後再試。"];
+            return ['ok' => false, 'message' => "登入嘗試次數過多，請於 {$minutes} 分鐘後再試。", 'event' => AuthLogService::LOGIN_LOCKED, 'detail' => null];
         }
 
         $user = $this->users->findByLogin($login);
@@ -80,18 +80,18 @@ class AuthService
         if (! $user || ! Hash::check($password, $user->password)) {
             RateLimiter::hit($key, $decaySeconds);
 
-            return ['ok' => false, 'message' => '帳號或密碼錯誤。'];
+            return ['ok' => false, 'message' => '帳號或密碼錯誤。', 'event' => AuthLogService::LOGIN_FAIL, 'detail' => $user ? 'wrong_password' : 'unknown_user'];
         }
 
         if (! $user->isActive()) {
-            return ['ok' => false, 'message' => '此帳號已停用，請聯絡系統管理員。'];
+            return ['ok' => false, 'message' => '此帳號已停用，請聯絡系統管理員。', 'event' => AuthLogService::LOGIN_FAIL, 'detail' => 'disabled'];
         }
 
         RateLimiter::clear($key);
         Auth::login($user, $remember && $this->idleMinutes() === 0);
         $this->users->touchLogin($user);
 
-        return ['ok' => true, 'message' => null];
+        return ['ok' => true, 'message' => null, 'event' => AuthLogService::LOGIN_OK, 'detail' => $remember && $this->idleMinutes() === 0 ? 'remember' : null];
     }
 
     /** @return Collection<int, Project> */

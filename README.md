@@ -16,9 +16,11 @@
 | DEV | 開發清單、排程、延期申請；**更新包**：勾選多張單一次套入就送測，並指定測試人員；移出更新包就撤回送測 |
 | Test | 測試、排程測試、退回（仍有異常）、測試通過、上線 |
 | 所有人 | 會議（討論事項、紀錄、分享給客戶、可匯出 Excel）、流程圖（自架 draw.io 和 Mermaid）、MES 頁面樹、時序總覽、報表、通知（站內和 Email）、關注 |
-| 管理員 | 使用者、專案、成員與角色、選項管理（狀態名稱、匯出欄位等）、郵件設定、資源回收筒、操作紀錄 |
+| 管理員 | 使用者、專案、成員與角色、選項管理（狀態名稱、匯出欄位等）、郵件設定、資源回收筒、操作紀錄；**登入紀錄**（登入成功／失敗、登出、閒置登出、改密碼等，含來源 IP，可篩選和匯出 Excel） |
 
 角色：客戶 PM、客戶檢視、內部 PM、DEV、Test、專案管理員，另外還有系統管理員。權限以專案為單位指派。
+
+安全：閒置 60 分鐘自動登出（`session.idle_minutes`，0 = 關閉；開啟時不提供「記住我」）；登入嘗試次數限制；登入紀錄保留 180 天（`auth_log.keep_days`）。
 
 ---
 
@@ -28,7 +30,7 @@
 - **後端**：PHP 8.3 以上（以 8.5 測試）、Laravel 13、spatie/laravel-permission（角色以專案為單位）、openspout（Excel）、symfony/html-sanitizer
 - **前端**：Blade、Alpine.js、Tailwind CSS 4、Vite；TipTap 編輯器；Mermaid；自架 draw.io
 - **資料庫**：MariaDB、MySQL（正式環境），SQLite（開發和測試）
-- **測試**：Pest（207 個 feature test）
+- **測試**：Pest（226 個 feature test）
 
 ### 分層
 ```
@@ -55,7 +57,7 @@ PM 階段（新建／待討論） → DEV（待開發 → 開發中） → TEST�
 cits/                     Laravel 應用程式
   app/Services/           Client、Pm、Dev、Test、Meeting、Flow、Collab、Export、Report……
   app/Repositories/
-  database/migrations/    資料表結構（14 個）
+  database/migrations/    資料表結構（15 個）
   database/seeders/data/workflow.php   狀態、流程、選項、權限的預設資料
   resources/views/        Blade 畫面
   routes/modules/         各模組的路由

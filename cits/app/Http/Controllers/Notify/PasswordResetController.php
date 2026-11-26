@@ -3,12 +3,13 @@
 namespace App\Http\Controllers\Notify;
 
 use App\Http\Controllers\Controller;
+use App\Services\AuthLogService;
 use App\Services\PasswordResetService;
 use Illuminate\Http\Request;
 
 class PasswordResetController extends Controller
 {
-    public function __construct(private PasswordResetService $svc) {}
+    public function __construct(private PasswordResetService $svc, private AuthLogService $authLog) {}
 
     public function forgot()
     {
@@ -22,7 +23,9 @@ class PasswordResetController extends Controller
         }
         $data = $request->validate(['login' => ['required', 'string', 'max:255']], [], ['login' => '帳號或 Email']);
 
-        if (! $this->svc->request($data['login'], (string) $request->ip())) {
+        $accepted = $this->svc->request($data['login'], (string) $request->ip());
+        $this->authLog->record($request, AuthLogService::PASSWORD_RESET_REQUESTED, null, $data['login'], $accepted ? null : 'throttled');
+        if (! $accepted) {
             return back()->with('err', '要求次數過多，請稍後再試。');
         }
 
@@ -45,7 +48,9 @@ class PasswordResetController extends Controller
             'password' => ['required', 'string', "min:{$min}", 'confirmed'],
         ], [], ['email' => 'Email', 'password' => '新密碼']);
 
-        if (! $this->svc->reset($data['email'], $token, $data['password'])) {
+        $done = $this->svc->reset($data['email'], $token, $data['password']);
+        $this->authLog->record($request, AuthLogService::PASSWORD_RESET, null, $data['email'], $done ? null : 'invalid_token');
+        if (! $done) {
             return back()->withInput($request->only('email'))->with('err', '重設連結無效或已過期，請重新申請。');
         }
 

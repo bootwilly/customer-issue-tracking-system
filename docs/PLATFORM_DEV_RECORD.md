@@ -27,6 +27,7 @@
 | `queue:work --stop-when-empty --max-time=50` | 每分鐘（實際每 5 分鐘） | 背景工作 |
 | `cits:cleanup-temp` | 每天 00:00 UTC | 清理暫存上傳 |
 | `cits:needinfo-remind` | 每天 01:30 UTC（台北 09:30） | 補充資料逾期提醒 |
+| `cits:purge-auth-logs` | 每天 19:25 UTC（台北 03:25） | 刪除超過 `auth_log.keep_days`（預設 180）天的登入紀錄 |
 
 **規則：cron 是每 5 分鐘跑一次，所以每日排程的分鐘數必須是 5 的倍數，否則永遠不會執行。**
 
@@ -71,7 +72,8 @@ Controller → Service（BLL，業務邏輯） → Repository（資料存取）
 | 流程圖 | `/flows`，`Flow/*` | drawio / mermaid，有草稿和版本 |
 | 會議 | `/meetings`，`MeetingService` | 討論事項、紀錄、內部備註、留言、分享給客戶、發布、下次會議、.ics；篩選類型／狀態／日期；**匯出 Excel（全部或單筆）** |
 | 專案管理 | `/project-admin` | 成員與角色、資源回收筒、操作紀錄 |
-| 系統管理 | `/admin` | 使用者、專案、選項管理、郵件設定、匯出設定 |
+| 系統管理 | `/admin` | 使用者、專案、選項管理、郵件設定、匯出設定、登入紀錄（`/admin/auth-logs`，`AuthLogService`；篩選、匯出 Excel；使用者編輯頁顯示最近 10 筆） |
+| 登入安全 | `LogoutWhenIdle`、`EnsureUserActive`、`AuthService` | 閒置 `session.idle_minutes`（60）分鐘自動登出，帶 `X-CITS-Background` 標頭的請求不算操作；開啟時停用「記住我」；登入嘗試次數限制；每個登入事件寫入 `auth_logs`（含 IP、X-Forwarded-For、User-Agent） |
 | 操作手冊 | `/manual`，`ManualService` | 來源是 `docs/manual/*.md` 和 `img/`；部署時打包進 `resources/manual`；依角色過濾章節 |
 | 通知 | `/notifications`，`EventRepository::notify`、`OutboxService` | 站內通知加 Email 佇列 |
 | 協作 | `routes/modules/collab.php`，`Services/Collab/*` | 補充資料、關注、重複單提示、我的查詢、標籤、相依關係 |
@@ -117,6 +119,7 @@ lookup `client_progress`：已提交 › 已接收・評估中 › 修正中 ›
 - 會議：`meetings`、`meeting_attendees`、`meeting_items`、`meeting_comments`、`meeting_reads`。
 - 流程圖：`project_flows`、`project_flow_revisions`。
 - 設定：`workflow_statuses`、`workflow_transitions`、`field_edit_rules`、`lookup_items`、`system_settings`。
+- 登入紀錄：`auth_logs`（`user_id` 沒有外鍵，使用者刪除後紀錄仍保留；事件代碼和說明在 lookup `auth_log_event`、`auth_log_detail`）。
 - 匯出欄位由 lookup `export_<清單>` 決定，例如 `export_pm_tickets`、`export_meetings`、`export_meeting_items`，可以在選項管理調整。
 
 ---
@@ -136,7 +139,8 @@ Email 只在以下條件都成立時才寄：郵件設定已啟用、使用者�
 ## 7. 開發環境（本機，Windows）
 
 - PHP：`/c/Users/<you>/AppData/Local/Microsoft/WinGet/Packages/PHP.PHP.NTS.8.5_Microsoft.Winget.Source_8wekyb3d8bbwe/php.exe`
-- 測試：在 `cits` 目錄執行 `php vendor/bin/pest`，目前 207 個全過。
+- 測試：在 `cits` 目錄執行 `php vendor/bin/pest`，目前 226 個全過。
+  - 和時間有關的程式要用 `now()`（Carbon），不要用 `time()`，否則測試的 `travel()` 沒有作用。
   - `SeedDataLengthTest` 會把所有 migration 以 MariaDB DDL 的 pretend 模式編譯，並檢查 `workflow.php` 的種子值有沒有超過欄位長度。
   - 因此資料 migration 必須用 `DB::statement` 寫原生 SQL。用 query builder 寫的 update 在 pretend 模式下會嘗試連線而失敗。
 - 前端建置：在 `cits` 執行 `ASSET_URL=/mescits npm run build`。
@@ -154,8 +158,8 @@ Email 只在以下條件都成立時才寄：郵件設定已啟用、使用者�
 1. 產生升級 SQL：`php deploy/make_upgrade_sql.php --applied=<已套用的 migration 名稱，逗號分隔>`，輸出到 `deploy/out/upgrade-<日期時間>.sql`。
    - 內容：未套用的 migration DDL、對應的 migration 紀錄，以及 lookup／setting／transition／權限的 INSERT IGNORE（已存在的資料不會被改）。
    - **要修改既有資料列，只能寫 migration**，因為 INSERT IGNORE 不會更新已存在的資料。
-   - 正式站目前已套用到 `2026_11_30_000200_create_collab_tables`。
-   - 2026-11-26 已把 `deploy/out/install.sql` 重新產生為最終版（含全部 14 個 migration），所以之後產生升級 SQL **不用再帶 `--applied`**。完整流程見 `docs/DEPLOYMENT_GUIDE.md`。
+   - 正式站目前已套用到 `2026_12_01_000100_create_auth_logs_table`（共 15 個，2026-11-27 以唯讀查詢確認和 repo 一致）。
+   - 2026-11-27 已把 `deploy/out/install.sql` 重新產生為最終版（含全部 15 個 migration），所以之後產生升級 SQL **不用再帶 `--applied`**。每次正式站跑完升級 SQL，都要重新產生它，否則下次會重複產生已套用的 DDL。完整流程見 `docs/DEPLOYMENT_GUIDE.md`。
 2. 交給使用者在 phpMyAdmin 執行。**要先在左側點選 `cpuser_mescits`**，曾經發生過跑到別的資料庫。
 3. 用一次性的唯讀 SELECT 腳本確認結果。腳本範本在本次 session 的暫存資料夾（scratchpad 底下的 `vq/`）：
    - 用 token 保護，執行一次就自刪。
@@ -209,6 +213,13 @@ Email 只在以下條件都成立時才寄：郵件設定已啟用、使用者�
 | 手冊 | 補上上述新功能的章節和截圖，已上線 |
 
 本輪新增的升級 SQL：`upgrade-20261126-0431.sql`（協作功能的表等）、`upgrade-20261126-0559.sql`（撤回送測、會議匯出欄位），兩份都已在正式站執行並確認。
+
+2026-11-27 追加：
+
+| 批次 | 內容 |
+|---|---|
+| 閒置自動登出 | 60 分鐘沒有操作就登出；剩 2 分鐘時跳出提示和「繼續使用」；多分頁共用計時；停用「記住我」 |
+| 登入紀錄 | 9 種登入事件加來源 IP 寫入 `auth_logs`；系統管理頁可篩選、匯出；保留 180 天。升級 SQL `upgrade-20261126-1633.sql` 已執行並確認 |
 
 ---
 

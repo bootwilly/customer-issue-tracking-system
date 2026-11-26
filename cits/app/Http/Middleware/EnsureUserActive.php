@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Services\AuthLogService;
 use App\Support\CurrentProject;
 use Closure;
 use Illuminate\Http\Request;
@@ -10,13 +11,14 @@ use Symfony\Component\HttpFoundation\Response;
 
 class EnsureUserActive
 {
-    public function __construct(private CurrentProject $current) {}
+    public function __construct(private CurrentProject $current, private AuthLogService $authLog) {}
 
     public function handle(Request $request, Closure $next): Response
     {
         $user = $request->user();
 
         if ($user && ! $user->isActive()) {
+            $this->authLog->record($request, AuthLogService::DISABLED_KICK, $user);
             Auth::logout();
             $request->session()->invalidate();
             $request->session()->regenerateToken();

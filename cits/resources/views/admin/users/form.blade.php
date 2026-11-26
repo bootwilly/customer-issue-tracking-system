@@ -54,4 +54,15 @@
             </div>
         </form>
     </div>
+    @if ($user->exists && isset($recentLogs))
+        <div class="mt-6 max-w-4xl">
+            <div class="mb-2 flex items-center justify-between">
+                <h2 class="text-base font-semibold">最近 {{ $recentLogs->count() }} 筆登入紀錄</h2>
+                <a href="{{ route('admin.auth-logs.index', ['user' => $user->account]) }}" class="text-sm text-indigo-700 hover:underline">查看全部</a>
+            </div>
+            <div class="overflow-x-auto rounded-lg bg-white shadow-sm">
+                @include('admin.auth-logs._table', ['rows' => $recentLogs, 'withUser' => false])
+            </div>
+        </div>
+    @endif
 @endsection

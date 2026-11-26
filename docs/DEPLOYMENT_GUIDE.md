@@ -1,6 +1,6 @@
 # CITS 部署手冊（現況版）
 
-> 版本：2026-11-26。正式站已套用到 migration `2026_11_30_000200_create_collab_tables`，程式碼和正式站同步。
+> 版本：2026-11-27。正式站已套用到 migration `2026_12_01_000100_create_auth_logs_table`（共 15 個），程式碼和正式站同步。
 > 本手冊說明：平台需求、系統特性、**全新安裝**、**資料庫升級**、**程式部署**、手冊部署、draw.io 部署、上線後設定、驗證、出問題時怎麼處理，以及每一步的注意事項。
 > 開發相關的背景請看 `docs/PLATFORM_DEV_RECORD.md`；長期規則請看 `PROJECT_CONTEXT.md`。
 
@@ -76,10 +76,10 @@
 
 | 檔案 | 用途 |
 |---|---|
-| **`deploy/out/install-20261126.sql`** | **全新安裝用的最終版**：空的資料庫執行一次，就建好全部 14 個 migration 的表、索引、外鍵，以及全部種子資料（狀態 27、轉換 40、欄位規則 11、選項 214、系統設定 16、權限 36、角色 6、角色權限 72）和初始管理員帳號 |
+| **`deploy/out/install-20261127.sql`** | **全新安裝用的最終版**：空的資料庫執行一次，就建好全部 15 個 migration 的表、索引、外鍵，以及全部種子資料（狀態 27、轉換 40、欄位規則 11、選項 238、系統設定 18、權限 36、角色 6、角色權限 72）和初始管理員帳號 |
 | `deploy/out/install.sql` | 內容同上。`make_upgrade_sql.php` 會以它的 migration 清單當作「已套用」的基準 |
-| `deploy/out/install-20261123.sql` | 舊版（第一次上線時的安裝檔），只留作紀錄，**不要再使用** |
-| `deploy/out/upgrade-20261126-0431.sql`、`upgrade-20261126-0559.sql` | 正式站已執行過的升級檔，留作紀錄，**不要重跑** |
+| `deploy/out/install-20261123.sql`、`install-20261126.sql` | 舊版（14 個 migration 以前），只留作紀錄，**不要再使用** |
+| `deploy/out/upgrade-20261126-0431.sql`、`upgrade-20261126-0559.sql`、`upgrade-20261126-1633.sql` | 正式站已執行過的升級檔，留作紀錄，**不要重跑**（1633 是登入紀錄 `auth_logs`） |
 
 **正式站現在不需要跑任何 SQL。** 以後有新的 migration 或種子資料時，照第 5 節產生新的升級 SQL。
 
@@ -115,7 +115,7 @@ cp deploy/out/install.sql deploy/out/install-$(date +%Y%m%d).sql
    - Select PHP Version 選 8.5，Extensions **勾 `nd_pdo_mysql`、取消 `pdo_mysql`**。
    - MySQL Databases：建立資料庫和使用者（例如 `cpuser_mescits`），給這個使用者「全部權限」。
    - 建立 Web Disk（WebDAV）兩個帳號：一個指到 `public_html/mescits`，一個指到 `app/mescits`（要在 public_html 之外）。把連線資訊設定到 `deploy/mcp_call.py` 的 profile。
-2. **資料庫**：phpMyAdmin → **左側先點選新建的資料庫** → SQL 分頁 → 貼上或匯入 `deploy/out/install-20261126.sql` → 執行。
+2. **資料庫**：phpMyAdmin → **左側先點選新建的資料庫** → SQL 分頁 → 貼上或匯入 `deploy/out/install-20261127.sql` → 執行。
    - 確認：`SELECT COUNT(*) FROM migrations;` 應該是 14；`SELECT COUNT(*) FROM lookup_items;` 應該是 214。
 3. **建置**：照第 6 節的步驟 1 到 4 建立快照、建置、測試、打包。
 4. **上傳公開檔**：把 `deploy/out/public/` 整個資料夾的內容（`index.php`、`.htaccess`、`build/`、favicon、robots）上傳到 `webdav-demo` 的 `/`。
@@ -182,7 +182,7 @@ foreach ($d in 'app\private','app\public','framework\cache\data','framework\sess
 ```bash
 cd "$S" && find cits docs deploy -type f -not -path "*/vendor/*" -not -path "*/node_modules/*" -print0 | sort -z | xargs -0 md5sum > ../snap.md5
 cd cits && ASSET_URL=/mescits npm run build          # Windows 上是 npm.cmd
-php artisan test                                      # 必須全過（目前 207 個）
+php artisan test                                      # 必須全過（目前 226 個）
 ```
 - `ASSET_URL=/mescits` 一定要帶，否則前端檔路徑會錯。
 - 測試沒全過就停止部署。
@@ -293,11 +293,15 @@ python -I deploy/build.py --no-npm
    ```
    - 只設這一筆就好。
    - 通知信最多會晚 5 分鐘寄出。
-   - **新增每日排程時，分鐘數必須是 5 的倍數**，否則永遠不會執行。目前的每日排程是 00:00（清理暫存）和 01:30 UTC（補充資料提醒）。
+   - **新增每日排程時，分鐘數必須是 5 的倍數**，否則永遠不會執行。目前的每日排程是 00:00（清理暫存）、01:30（補充資料提醒）和 19:25 UTC（台北 03:25，清除超過保留天數的登入紀錄）。
    - 確認方式：看 `outbox` 表的狀態有沒有從 `pending` 變成 `sent`（唯讀 SELECT），或在畫面上觸發一個通知後等 5 分鐘。
 4. **專案與成員**：系統管理 → 專案 → 新增；使用者 → 建立帳號；專案 → 成員與角色。
    一個專案至少要有客戶 PM、內部 PM、DEV、Test 各一人。
 5. **選項**：系統管理 → 選項管理，可調整會議類型、處理類型、內部單標籤、匯出欄位等。
+6. **登入安全**（system_settings，目前沒有畫面，要改請產生 SQL 由使用者執行）：
+   - `session.idle_minutes`：閒置幾分鐘自動登出，預設 60，0 = 關閉。開啟時登入頁不顯示「記住我」。
+   - `auth_log.keep_days`：登入紀錄保留天數，預設 180，0 = 永久保留。
+   - 登入紀錄在「系統管理 → 登入紀錄」。IP 取自 `Request::ip()`（主機前面是 openresty 代理，`trustProxies('*')` 會採用代理附加在 `X-Forwarded-For` 最右邊的值）；原始 `X-Forwarded-For` 也一起存。
 
 ---
 
@@ -327,6 +331,7 @@ python -I deploy/build.py --no-npm
 | 約 13:30 | 更新包套入即送測 | 無 |
 | 14:20 | 撤回送測、會議篩選與匯出 | upgrade-20261126-0559.sql |
 | 14:35 | 手冊完整版 | 無 |
+| 11-27 | 登入紀錄（含來源 IP，`auth_logs`） | upgrade-20261126-1633.sql |
 | 11-27 00:05 | 閒置 60 分鐘自動登出（54aafc7） | 無 |
 
 ---

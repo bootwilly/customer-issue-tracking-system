@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\AdminService;
+use App\Services\AuthLogService;
 use App\Services\AuthService;
 use DomainException;
 use Illuminate\Http\Request;
@@ -12,7 +13,7 @@ use Illuminate\Validation\Rule;
 
 class UserController extends Controller
 {
-    public function __construct(private AdminService $admin, private AuthService $auth) {}
+    public function __construct(private AdminService $admin, private AuthService $auth, private AuthLogService $authLog) {}
 
     public function index()
     {
@@ -34,7 +35,10 @@ class UserController extends Controller
 
     public function edit(User $user)
     {
-        return view('admin.users.form', ['user' => $user, 'minLength' => $this->auth->passwordMinLength()]);
+        return view('admin.users.form', [
+            'user' => $user, 'minLength' => $this->auth->passwordMinLength(),
+            'recentLogs' => $this->authLog->recentForUser($user), 'events' => $this->authLog->events(), 'details' => $this->authLog->details(),
+        ]);
     }
 
     public function update(Request $request, User $user)

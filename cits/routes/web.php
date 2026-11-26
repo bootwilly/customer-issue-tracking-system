@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Account\PasswordController;
+use App\Http\Controllers\Admin\AuthLogController;
 use App\Http\Controllers\Admin\MemberController;
 use App\Http\Controllers\Admin\ProjectController;
 use App\Http\Controllers\Admin\UserController;
@@ -38,6 +39,9 @@ Route::middleware(['auth', 'active', 'admin'])->prefix('admin')->name('admin.')-
     Route::get('users/{user}/edit', [UserController::class, 'edit'])->name('users.edit');
     Route::put('users/{user}', [UserController::class, 'update'])->name('users.update');
     Route::delete('users/{user}', [UserController::class, 'destroy'])->name('users.destroy');
+
+    Route::get('auth-logs', [AuthLogController::class, 'index'])->name('auth-logs.index');
+    Route::get('auth-logs/export', [AuthLogController::class, 'export'])->name('auth-logs.export');
 
     Route::get('projects', [ProjectController::class, 'index'])->name('projects.index');
     Route::get('projects/create', [ProjectController::class, 'create'])->name('projects.create');

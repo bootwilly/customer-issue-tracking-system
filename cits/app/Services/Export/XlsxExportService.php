@@ -69,12 +69,13 @@ class XlsxExportService
         }
     }
 
-    public function download(ExportBook $book, User $user, int $projectId, string $projectName): BinaryFileResponse
+    /** $projectId null: a system-wide list (admin pages); there is no project event log to write to. */
+    public function download(ExportBook $book, User $user, ?int $projectId, string $projectName): BinaryFileResponse
     {
         $path = tempnam(sys_get_temp_dir(), 'cits_xlsx_');
         $this->write($book, $path, $user, $projectName);
 
-        $this->events->log($projectId, 'export', $projectId, 'export', null, null, $user->id, [
+        $projectId === null || $this->events->log($projectId, 'export', $projectId, 'export', null, null, $user->id, [
             'list' => $book->listKey,
             'rows' => array_sum(array_map(fn (ExportSheet $s) => count($s->rows), $book->sheets)),
             'filters' => $book->info,

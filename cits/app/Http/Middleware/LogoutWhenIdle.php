@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Services\AuthLogService;
 use App\Services\AuthService;
 use Closure;
 use Illuminate\Http\Request;
@@ -19,7 +20,7 @@ class LogoutWhenIdle
 
     public const BACKGROUND_HEADER = 'X-CITS-Background';
 
-    public function __construct(private AuthService $auth) {}
+    public function __construct(private AuthService $auth, private AuthLogService $authLog) {}
 
     public function handle(Request $request, Closure $next): Response
     {
@@ -30,9 +31,11 @@ class LogoutWhenIdle
 
         $session = $request->session();
         $last = (int) $session->get(self::SESSION_KEY, 0);
-        $expired = Auth::viaRemember() || ($last > 0 && now()->getTimestamp() - $last > $minutes * 60);
+        $viaRemember = Auth::viaRemember();
+        $expired = $viaRemember || ($last > 0 && now()->getTimestamp() - $last > $minutes * 60);
 
         if ($expired) {
+            $this->authLog->record($request, AuthLogService::IDLE_LOGOUT, Auth::user(), null, $viaRemember ? 'remember' : null);
             Auth::logout();
             $session->invalidate();
             $session->regenerateToken();

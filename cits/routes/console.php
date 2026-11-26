@@ -10,6 +10,7 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('cits:cleanup-temp')->daily();
+Schedule::command('cits:purge-auth-logs')->dailyAt('19:25'); // 03:25 Asia/Taipei; cron runs every 5 minutes
 Schedule::command('cits:needinfo-remind')->dailyAt('01:30'); // 09:30 Asia/Taipei (app runs in UTC)
 
 Schedule::command('cits:send-outbox')->everyMinute()->withoutOverlapping();
