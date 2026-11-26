@@ -36,8 +36,8 @@ class SettlementService
             if ($active->isEmpty()) {
                 if (! $t->needs_pm_action) {
                     $this->tickets->save($t, ['needs_pm_action' => true]);
-                    $this->watch->notifyTicket($t, "{$t->ticket_no} 的內部單都已取消，需要 PM 處置", null,
-                        $this->events->userIdsWithPermission($t->project_id, 'ticket.settle'), []);
+                    $this->watch->notifyTicket($t, "{$t->ticket_no} 的內部單都已取消，需要 PM 處置", $actorId,
+                        $this->events->userIdsWithPermission($t->project_id, 'ticket.settle'), [], internalOnly: true);
                 }
 
                 continue;

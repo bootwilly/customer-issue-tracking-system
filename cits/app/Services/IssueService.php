@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Exceptions\BusinessException;
 use App\Models\Issue;
+use App\Models\Package;
 use App\Models\User;
 use App\Repositories\EventRepository;
 use App\Repositories\IssueRepository;
@@ -230,69 +231,105 @@ class IssueService
     }
 
     /** Generic status change with side effects (dispatch lock, rework count, release, exclusion, settlement). */
-    public function transition(User $u, int $id, int $projectId, string $to, array $data = []): Issue
+    public function transition(User $u, int $id, int $projectId, string $to, array $data = [], ?string $newPackageName = null): Issue
     {
-        return $this->uow->run(function () use ($u, $id, $projectId, $to, $data) {
+        return $this->uow->run(function () use ($u, $id, $projectId, $to, $data, $newPackageName) {
             $i = $this->locked($id, $projectId, $u);
-            $from = $i->status;
-            $fromSt = $this->wf->status('issue', $from);
-            $toSt = $this->wf->status('issue', $to);
-            $data = array_intersect_key($data, array_flip(self::TRANSITION_FIELDS));
-            if ($toSt->is_excluded && $this->tickets->linkCountOfIssue($i->id) > 0 && trim((string) ($data['client_note'] ?? '')) === '') {
-                throw new BusinessException('此內部單有連結客戶單，請填寫給客戶看的說明。');
-            }
-            foreach (self::ASSIGNEE_PERMISSION as $f => $perm) {
-                if (! empty($data[$f]) && (int) $data[$f] !== $i->{$f}
-                    && ! in_array((int) $data[$f], array_map('intval', $this->events->userIdsWithPermission($projectId, $perm)), true)) {
-                    throw new BusinessException('指派的人員沒有這個專案的對應權限。');
+            $name = trim($newPackageName ?? '');
+            if ($name !== '') {
+                $target = $this->wf->allowedTargets('issue', $i->status, $u, $projectId)->firstWhere('code', $to);
+                if (! in_array(self::PACKAGE_FIELD, $target['requires'] ?? [], true)) {
+                    throw new BusinessException('這個狀態變更不能指定更新包。');
                 }
+                $data[self::PACKAGE_FIELD] = $this->createPackage($u, $projectId, $name);
             }
-            foreach (self::KEPT_ASSIGNEES as $f) {
-                if (empty($data[$f]) && $i->{$f} !== null) {
-                    $data[$f] = $i->{$f};
-                }
-            }
-            if (array_key_exists('planned_due', $data) && $i->current_due !== null) {
-                unset($data['planned_due']); // already set: never overwritten by a transition
-            }
-            $this->wf->assertTransition('issue', $from, $to, $u, $projectId, $data + ($i->current_due ? ['planned_due' => $i->current_due] : []));
-            $this->deps->assertCanEnter($i, $fromSt, $toSt);
 
-            $set = $data + ['status' => $to, 'stage' => $toSt->stage ?? $i->stage];
-            if (isset($data['planned_due'])) {
-                $set['current_due'] = $data['planned_due'];
+            return $this->applyTransition($u, $i, $to, $data);
+        });
+    }
+
+    private function applyTransition(User $u, Issue $i, string $to, array $data, ?Collection $packages = null): Issue
+    {
+        $projectId = $i->project_id;
+        $from = $i->status;
+        $fromSt = $this->wf->status('issue', $from);
+        $toSt = $this->wf->status('issue', $to);
+        $data = array_intersect_key($data, array_flip(self::TRANSITION_FIELDS));
+        if ($toSt->is_excluded && $this->tickets->linkCountOfIssue($i->id) > 0 && trim((string) ($data['client_note'] ?? '')) === '') {
+            throw new BusinessException('此內部單有連結客戶單，請填寫給客戶看的說明。');
+        }
+        foreach (self::ASSIGNEE_PERMISSION as $f => $perm) {
+            if (! empty($data[$f]) && (int) $data[$f] !== $i->{$f}
+                && ! in_array((int) $data[$f], array_map('intval', $this->events->userIdsWithPermission($projectId, $perm)), true)) {
+                throw new BusinessException('指派的人員沒有這個專案的對應權限。');
             }
-            $leavingPm = $fromSt->stage === $this->pmStage() && $toSt->stage !== null && $toSt->stage !== $this->pmStage();
-            if ($leavingPm) {
-                $set['content_locked_at'] = now();
+        }
+        foreach (self::KEPT_ASSIGNEES as $f) {
+            if (empty($data[$f]) && $i->{$f} !== null) {
+                $data[$f] = $i->{$f};
             }
-            if ($fromSt->stage === $this->wf->lookupValue('stage_role', 'test') && $toSt->stage === $this->wf->lookupValue('stage_role', 'dev')) {
-                $set['rework_count'] = $i->rework_count + 1;
+        }
+        if (array_key_exists('planned_due', $data) && $i->current_due !== null) {
+            unset($data['planned_due']); // already set: never overwritten by a transition
+        }
+        $this->wf->assertTransition('issue', $from, $to, $u, $projectId, $data + ($i->current_due ? ['planned_due' => $i->current_due] : []));
+        $this->deps->assertCanEnter($i, $fromSt, $toSt);
+
+        $set = $data + ['status' => $to, 'stage' => $toSt->stage ?? $i->stage];
+        if (isset($data['planned_due'])) {
+            $set['current_due'] = $data['planned_due'];
+        }
+        $leavingPm = $fromSt->stage === $this->pmStage() && $toSt->stage !== null && $toSt->stage !== $this->pmStage();
+        if ($leavingPm) {
+            $set['content_locked_at'] = now();
+        }
+        if ($fromSt->stage === $this->wf->lookupValue('stage_role', 'test') && $toSt->stage === $this->wf->lookupValue('stage_role', 'dev')) {
+            $set['rework_count'] = $i->rework_count + 1;
+        }
+        $hasPackage = array_key_exists(self::PACKAGE_FIELD, $data);
+        $packageId = $i->package_id;
+        if ($hasPackage) {
+            $packageId = isset($data[self::PACKAGE_FIELD]) ? (int) $data[self::PACKAGE_FIELD] : null;
+        }
+        $changingPackage = $packageId !== $i->package_id;
+        if ($hasPackage || $toSt->is_released) {
+            if ($changingPackage && ($fromSt->is_released || $i->released_at !== null)) {
+                throw new BusinessException("{$i->issue_no} 已上線，不能變更所屬更新包。");
             }
-            if (isset($data['package_id'])) {
-                if ($this->issues->findPackage((int) $data['package_id'])?->project_id !== $projectId) {
-                    throw new BusinessException('更新包不存在。');
-                }
+            $packages ??= $this->lockPackages($projectId, [$i->package_id, $packageId]);
+            $releasedCodes = $this->releasedIssueCodes();
+            if ($changingPackage && $i->package_id !== null) {
+                $this->assertPackageOpen($packages->get($i->package_id), $releasedCodes);
+            }
+            $package = $packageId !== null ? $packages->get($packageId) : null;
+            if ($changingPackage && $package) {
+                $this->assertPackageOpen($package, $releasedCodes);
+            }
+            if ($hasPackage && $package && ! $toSt->is_released) {
                 $set['actual_done_at'] = now();
             }
             if ($toSt->is_released) {
-                $set['released_at'] = now();
+                $set['released_at'] = $i->released_at ?? now();
+                // The first confirmation freezes the package. Older packages may already be frozen without a reliable date.
+                if ($package && ! $this->packageIsReleased($package, $releasedCodes)) {
+                    $this->issues->markPackageReleased($package, $set['released_at']);
+                }
             }
-            $this->issues->save($i, $set);
-            $this->events->log($projectId, 'issue', $i->id, 'status', $from, $to, $u->id,
-                array_filter(['note' => $data['cancel_reason'] ?? null]));
+        }
+        $this->issues->save($i, $set);
+        $this->events->log($projectId, 'issue', $i->id, 'status', $from, $to, $u->id,
+            array_filter(['note' => $data['cancel_reason'] ?? null]));
 
-            if ($leavingPm || ($toSt->stage !== null && $toSt->stage !== $this->pmStage())) {
-                $this->chainLock($i, $u->id);
-            }
-            $this->watch->autoWatchIssue($i, [$i->assignee_dev_id, $i->assignee_test_id]);
-            if ($toSt->stage !== $fromSt->stage) {
-                $this->notifyStage($i, "{$i->issue_no} 狀態：{$toSt->name}", $u->id);
-            }
-            $this->settle->recompute($i->id, $u->id);
+        if ($leavingPm || ($toSt->stage !== null && $toSt->stage !== $this->pmStage())) {
+            $this->chainLock($i, $u->id);
+        }
+        $this->watch->autoWatchIssue($i, [$i->assignee_dev_id, $i->assignee_test_id]);
+        if ($toSt->stage !== $fromSt->stage) {
+            $this->notifyStage($i, "{$i->issue_no} 狀態：{$toSt->name}", $u->id);
+        }
+        $this->settle->recompute($i->id, $u->id);
 
-            return $i;
-        });
+        return $i;
     }
 
     /** Link another client ticket to an existing issue (problem convergence). */
@@ -358,9 +395,20 @@ class IssueService
         return $this->issues->createPackage($projectId, trim($name), $u->id)->id;
     }
 
-    public function packages(int $projectId): Collection
+    public function packages(int $projectId, ?int $currentPackageId = null): Collection
     {
-        return $this->issues->packages($projectId);
+        $releasedCodes = $this->releasedIssueCodes();
+        $current = $currentPackageId === null ? null : $this->issues->packageWithReleaseState($projectId, $currentPackageId, $releasedCodes);
+        if ($current && ($current->released_at || $current->has_released_issue)) {
+            return collect([$current]);
+        }
+
+        $open = $this->issues->packages($projectId, $releasedCodes, openOnly: true);
+        if ($current && ! $open->contains('id', $current->id)) {
+            $open->prepend($current);
+        }
+
+        return $open;
     }
 
     /** @return string[] issue statuses with a hand-off transition that requires a package (DEV done -> waiting for test) */
@@ -373,14 +421,16 @@ class IssueService
     /** Package list data: packages, their issues, and the issues that may still be added. */
     public function packageBoard(int $projectId): array
     {
-        $packages = $this->issues->packages($projectId);
+        $releasedCodes = $this->releasedIssueCodes();
+        $packages = $this->issues->packages($projectId, $releasedCodes);
+        $candidateCodes = $this->packageCandidateCodes();
 
         return [
             'packages' => $packages,
             'packageIssues' => $this->issues->issuesOfPackages($packages->pluck('id')->all()),
-            'packageCandidates' => $this->issues->inStatuses($projectId, $this->packageCandidateCodes()),
-            'packageHandoffCodes' => $this->packageCandidateCodes(),
-            'packageTarget' => ($c = $this->packageCandidateCodes()) ? $this->wf->label('issue', (string) $this->wf->targetRequiring('issue', $c[0], self::PACKAGE_FIELD)) : null,
+            'packageCandidates' => $this->issues->packageCandidates($projectId, $candidateCodes, $releasedCodes),
+            'packageHandoffCodes' => $candidateCodes,
+            'packageTarget' => $candidateCodes ? $this->wf->label('issue', (string) $this->wf->targetRequiring('issue', $candidateCodes[0], self::PACKAGE_FIELD)) : null,
         ];
     }
 
@@ -398,16 +448,14 @@ class IssueService
         if (! $issueIds) {
             throw new BusinessException('請勾選要套入的問題單。');
         }
-        $p = $this->package($packageId, $projectId);
         $allowed = $this->packageCandidateCodes();
+        sort($issueIds, SORT_NUMERIC);
 
-        return $this->uow->run(function () use ($u, $projectId, $p, $issueIds, $allowed, $testerId) {
-            $n = 0;
-            foreach ($issueIds as $id) {
-                $i = $this->issues->find($id);
-                if (! $i || $i->project_id !== $projectId) {
-                    throw new BusinessException('找不到問題單。');
-                }
+        return $this->uow->run(function () use ($u, $projectId, $packageId, $issueIds, $allowed, $testerId) {
+            $issues = collect($issueIds)->map(fn (int $id) => $this->locked($id, $projectId, $u));
+            $packages = $this->lockPackages($projectId, [...$issues->pluck(self::PACKAGE_FIELD)->all(), $packageId]);
+            $p = $packages->get($packageId);
+            foreach ($issues as $i) {
                 if (! in_array($i->status, $allowed, true)) {
                     throw new BusinessException("{$i->issue_no} 目前的狀態不能套入更新包。");
                 }
@@ -416,15 +464,14 @@ class IssueService
                 }
                 $to = $this->wf->targetRequiring('issue', $i->status, self::PACKAGE_FIELD);
                 try {
-                    $this->transition($u, $i->id, $projectId, $to, array_filter([self::PACKAGE_FIELD => $p->id, 'assignee_test_id' => $testerId]));
+                    $this->applyTransition($u, $i, $to, array_filter([self::PACKAGE_FIELD => $p->id, 'assignee_test_id' => $testerId]), $packages);
                 } catch (BusinessException $e) {
                     throw new BusinessException("{$i->issue_no}：".$e->getMessage());
                 }
                 $this->events->log($projectId, 'issue', $i->id, 'package_set', null, null, $u->id, ['note' => $p->name]);
-                $n++;
             }
 
-            return $n;
+            return $issues->count();
         });
     }
 
@@ -439,12 +486,14 @@ class IssueService
     public function removeFromPackage(User $u, int $projectId, int $packageId, int $issueId): bool
     {
         $this->wf->authorize($u, 'dev.manage', $projectId);
-        $p = $this->package($packageId, $projectId);
-        return $this->uow->run(function () use ($u, $projectId, $p, $issueId) {
-            $i = $this->issues->findForUpdate($issueId);
-            if (! $i || $i->project_id !== $projectId || $i->package_id !== $p->id) {
+
+        return $this->uow->run(function () use ($u, $projectId, $packageId, $issueId) {
+            $i = $this->locked($issueId, $projectId, $u);
+            if ($i->package_id !== $packageId) {
                 throw new BusinessException('這張單不在此更新包。');
             }
+            $p = $this->lockPackages($projectId, [$packageId])->get($packageId);
+            $this->assertPackageOpen($p, $this->releasedIssueCodes());
             if (in_array($i->status, $this->packageCandidateCodes(), true)) {
                 $this->issues->save($i, [self::PACKAGE_FIELD => null]);
                 $this->events->log($projectId, 'issue', $i->id, 'package_unset', null, null, $u->id, ['note' => $p->name]);
@@ -454,7 +503,7 @@ class IssueService
             $devStage = $this->wf->lookupValue('stage_role', 'dev');
             $back = $this->wf->targetByPermission('issue', $i->status, WorkflowService::SYSTEM, fn ($s) => $s->stage === $devStage);
             if ($back === null) {
-                throw new BusinessException("{$i->issue_no} 已開始測試或已上線，不能移出更新包；請由測試人員判定「".$this->failedLabel()."」退回。");
+                throw new BusinessException("{$i->issue_no} 已開始測試或已上線，不能移出更新包；請由測試人員判定「".$this->failedLabel().'」退回。');
             }
             $from = $i->status;
             $this->wf->assertTransition('issue', $from, $back, null, $projectId); // system transition, authorized above
@@ -483,17 +532,35 @@ class IssueService
         return $dev;
     }
 
-    private function package(int $packageId, int $projectId): \App\Models\Package
+    /** Package writers lock issues first, then each affected package in ascending order. */
+    private function lockPackages(int $projectId, array $packageIds): Collection
     {
-        $p = $this->issues->findPackage($packageId);
-        if (! $p || $p->project_id !== $projectId) {
-            throw new BusinessException('更新包不存在。');
-        }
-        if ($p->released_at) {
-            throw new BusinessException("更新包 {$p->name} 已上線，不能再變更內容。");
-        }
+        return collect($packageIds)->reject(fn ($id) => $id === null)->unique()->sort(SORT_NUMERIC)
+            ->mapWithKeys(function (int $id) use ($projectId) {
+                $package = $this->issues->findPackageForUpdate($id);
+                if (! $package || $package->project_id !== $projectId) {
+                    throw new BusinessException('更新包不存在。');
+                }
 
-        return $p;
+                return [$id => $package];
+            });
+    }
+
+    private function releasedIssueCodes(): array
+    {
+        return $this->wf->statusMap('issue')->filter(fn ($status) => $status->is_released)->keys()->all();
+    }
+
+    private function packageIsReleased(Package $package, array $releasedCodes): bool
+    {
+        return $package->released_at !== null || $this->issues->hasReleasedPackageIssue($package, $releasedCodes);
+    }
+
+    private function assertPackageOpen(Package $package, array $releasedCodes): void
+    {
+        if ($this->packageIsReleased($package, $releasedCodes)) {
+            throw new BusinessException("更新包 {$package->name} 已上線，不能再變更內容。");
+        }
     }
 
     public function addComment(User $u, int $id, int $projectId, string $html, ?string $draft = null): void

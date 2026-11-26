@@ -83,11 +83,14 @@
             </form>
         @endif
         @forelse ($packages as $p)
-            @php $inPkg = $packageIssues->get($p->id, collect()); @endphp
+            @php
+                $inPkg = $packageIssues->get($p->id, collect());
+                $released = $p->released_at || $p->has_released_issue;
+            @endphp
             <div class="border-t border-slate-100 py-2 text-sm">
                 <div class="flex justify-between">
                     <span class="font-medium">{{ $p->name }} <span class="font-normal text-slate-500">（{{ $inPkg->count() }} 張）</span></span>
-                    <span class="text-slate-500">{{ tw($p->built_at) }}{{ $p->released_at ? '　已上線 '.tw($p->released_at) : '' }}</span>
+                    <span class="text-slate-500">{{ tw($p->built_at) }}{{ $released ? '　已上線' : '' }}{{ $p->released_at ? ' '.tw($p->released_at) : '' }}</span>
                 </div>
                 @if ($inPkg->isNotEmpty())
                     <ul class="mt-1 space-y-0.5 pl-3">
@@ -96,7 +99,7 @@
                                 <a href="{{ route('issues.show', $pi->id) }}" class="font-mono text-xs text-indigo-700 hover:underline">{{ $pi->issue_no }}</a>
                                 <span class="truncate">{{ $pi->title }}</span>
                                 <x-badge :status="$pi->status" scope="issue" />
-                                @if ($canManage && ! $p->released_at)
+                                @if ($canManage && ! $released)
                                     <form method="POST" action="{{ route('dev.packages.issues.remove', [$p->id, $pi->id]) }}" onsubmit="return confirm(@js(in_array($pi->status, $packageHandoffCodes, true) ? '把 '.$pi->issue_no.' 移出 '.$p->name.'？' : '把 '.$pi->issue_no.' 移出 '.$p->name.'？已送測的單會撤回送測、退回開發中，並通知測試人員。'))">
                                         @csrf @method('DELETE')
                                         <button class="text-xs text-slate-400 hover:text-red-600" title="移出更新包">✕</button>
@@ -107,7 +110,7 @@
                     </ul>
                 @endif
                 @php $cands = $packageCandidates; @endphp
-                @if ($canManage && ! $p->released_at && $cands->isNotEmpty())
+                @if ($canManage && ! $released && $cands->isNotEmpty())
                     <details class="mt-1 pl-3">
                         <summary class="cursor-pointer text-xs text-indigo-700">套入問題單…</summary>
                         <form method="POST" action="{{ route('dev.packages.issues.add', $p->id) }}" class="mt-1 space-y-0.5" data-pkg-form>

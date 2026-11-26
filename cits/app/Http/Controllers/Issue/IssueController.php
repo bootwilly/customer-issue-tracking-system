@@ -39,11 +39,8 @@ class IssueController extends Controller
         ]);
 
         return $this->act(function () use ($u, $id, $in) {
-            if (trim((string) ($in['new_package_name'] ?? '')) !== '') {
-                $in['package_id'] = $this->issues->createPackage($u, $this->pid(), $in['new_package_name']);
-            }
             $data = $this->q->transitionInput($id, $this->pid(), $u, $in['to'], $in);
-            $this->issues->transition($u, $id, $this->pid(), $in['to'], $data);
+            $this->issues->transition($u, $id, $this->pid(), $in['to'], $data, $in['new_package_name'] ?? null);
         }, '狀態已更新。');
     }
 
