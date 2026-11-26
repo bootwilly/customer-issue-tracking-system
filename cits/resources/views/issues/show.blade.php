@@ -146,7 +146,9 @@
                                         @case('package_id')
                                             <select name="package_id" class="{{ $input }}"><option value="">請選擇</option>
                                                 @foreach ($packages as $p)<option value="{{ $p->id }}" @selected($issue->package_id === $p->id)>{{ $p->name }}</option>@endforeach</select>
-                                            <input type="text" name="new_package_name" maxlength="150" placeholder="或新增更新包名稱" class="{{ $input }} mt-1">
+                                            @unless ($packages->contains(fn ($p) => $p->released_at || $p->has_released_issue))
+                                                <input type="text" name="new_package_name" maxlength="150" placeholder="或新增更新包名稱" class="{{ $input }} mt-1">
+                                            @endunless
                                             @break
                                         @case('planned_due')
                                         @case('test_scheduled_at')

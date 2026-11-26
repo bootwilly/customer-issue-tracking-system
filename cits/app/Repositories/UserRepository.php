@@ -32,6 +32,12 @@ class UserRepository
         return User::find($id);
     }
 
+    /** @param int[] $ids */
+    public function notificationUsers(array $ids): Collection
+    {
+        return User::findMany($ids, ['id', 'user_type', 'is_admin']);
+    }
+
     public function findByLogin(string $login): ?User
     {
         $login = mb_strtolower(trim($login));

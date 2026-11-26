@@ -1,11 +1,13 @@
 <?php
 
 use App\Exceptions\BusinessException;
+use App\Models\Package;
 use App\Models\Project;
 use App\Models\User;
 use App\Services\Client\ClientProgressService;
 use App\Services\IssueService;
 use App\Services\TicketService;
+use App\Services\WorkflowService;
 use Illuminate\Support\Facades\DB;
 use Spatie\Permission\PermissionRegistrar;
 
@@ -139,7 +141,7 @@ it('a package takes several fixes at once and sends them to test with the chosen
     expect(DB::table('user_notifications')->where('user_id', $this->tester->id)->pluck('title'))->toContain("{$b->issue_no} 已撤回送測（移出更新包 v2）");
     ($this->s)($this->dev)->get(route('issues.show', $b->id))->assertSee('撤回送測')->assertSee('套入更新包')->assertSee('v2');
     ($this->s)($this->tester)->get(route('issues.show', $a->id))->assertOk();
-    expect(app(\App\Services\WorkflowService::class)->allowedTargets('issue', 'test_pending', $this->dev, $this->p->id)->pluck('code'))->not->toContain('dev_doing');
+    expect(app(WorkflowService::class)->allowedTargets('issue', 'test_pending', $this->dev, $this->p->id)->pluck('code'))->not->toContain('dev_doing');
     // re-send keeps the tester
     $this->is->addToPackage($this->dev, $this->p->id, $pkg, [$b->id]);
     expect($b->fresh()->status)->toBe('test_pending');
@@ -158,3 +160,87 @@ it('a package takes several fixes at once and sends them to test with the chosen
     DB::table('packages')->where('id', $pkg)->update(['released_at' => now()]);
     expect(fn () => $this->is->addToPackage($this->dev, $this->p->id, $pkg, [$e->id], $this->tester->id))->toThrow(BusinessException::class, '已上線');
 });
+
+it('freezes membership on the first release and keeps individual release confirmations available', function () {
+    $makeReady = function (string $title) {
+        $i = $this->is->createInternal($this->pm, $this->p->id, 'pm', ['title' => $title, 'content_html' => '<p>x</p>']);
+        ($this->toDev)($i);
+
+        return $i;
+    };
+    [$first, $second, $outsider, $waiting] = [$makeReady('A'), $makeReady('B'), $makeReady('C'), $makeReady('D')];
+    $pkg = $this->is->createPackage($this->dev, $this->p->id, '凍結版本');
+    $next = $this->is->createPackage($this->dev, $this->p->id, '下一版');
+    $this->is->addToPackage($this->dev, $this->p->id, $pkg, [$first->id, $second->id, $waiting->id], $this->tester->id);
+    foreach ([$first, $second] as $i) {
+        $this->is->transition($this->tester, $i->id, $this->p->id, 'test_doing');
+        $this->is->transition($this->tester, $i->id, $this->p->id, 'release_pending', ['release_planned_at' => '2026-12-05']);
+    }
+    expect(Package::findOrFail($pkg)->released_at)->toBeNull();
+    $this->is->transition($this->tester, $first->id, $this->p->id, 'released');
+    $releasedAt = Package::findOrFail($pkg)->released_at;
+    expect($releasedAt)->not->toBeNull()->and($releasedAt->equalTo($first->fresh()->released_at))->toBeTrue();
+
+    $handoff = ['to' => 'test_pending', 'package_id' => $pkg, 'assignee_test_id' => $this->tester->id];
+    ($this->s)($this->dev)->post(route('issues.transition', $outsider->id), $handoff)
+        ->assertSessionHas('err', '更新包 凍結版本 已上線，不能再變更內容。');
+    ($this->s)($this->dev)->post(route('dev.packages.issues.add', $pkg), ['issue_ids' => [$outsider->id], 'assignee_test_id' => $this->tester->id])
+        ->assertSessionHas('err');
+    ($this->s)($this->dev)->delete(route('dev.packages.issues.remove', [$pkg, $waiting->id]))
+        ->assertSessionHas('err', '更新包 凍結版本 已上線，不能再變更內容。');
+    expect($outsider->fresh()->package_id)->toBeNull()
+        ->and($waiting->fresh()->package_id)->toBe($pkg)->and($waiting->fresh()->status)->toBe('test_pending');
+    ($this->s)($this->dev)->get(route('issues.show', $outsider->id))->assertOk()
+        ->assertDontSee('凍結版本')->assertSee('下一版');
+
+    $this->is->transition($this->tester, $waiting->id, $this->p->id, 'test_doing');
+    $this->is->transition($this->tester, $waiting->id, $this->p->id, 'test_failed');
+    $this->is->transition($this->dev, $waiting->id, $this->p->id, 'dev_doing');
+    ($this->s)($this->dev)->get(route('issues.show', $waiting->id))->assertOk()
+        ->assertSee('凍結版本')->assertDontSee('下一版')->assertDontSee('new_package_name');
+    ($this->s)($this->dev)->post(route('issues.transition', $waiting->id), array_replace($handoff, ['package_id' => $next]))
+        ->assertSessionHas('err', '更新包 凍結版本 已上線，不能再變更內容。');
+    expect(fn () => $this->is->addToPackage($this->dev, $this->p->id, $next, [$outsider->id, $waiting->id], $this->tester->id))
+        ->toThrow(BusinessException::class, '更新包 凍結版本 已上線');
+    expect($outsider->fresh()->status)->toBe('dev_doing')->and($outsider->fresh()->package_id)->toBeNull();
+    ($this->s)($this->dev)->post(route('issues.transition', $waiting->id), array_replace($handoff, ['package_id' => null, 'new_package_name' => '不應留空包']))
+        ->assertSessionHas('err', '更新包 凍結版本 已上線，不能再變更內容。');
+    expect(Package::where('project_id', $this->p->id)->where('name', '不應留空包')->exists())->toBeFalse();
+    ($this->s)($this->dev)->post(route('issues.transition', $waiting->id), $handoff)->assertSessionHas('ok');
+    expect($waiting->fresh()->status)->toBe('test_pending')->and($waiting->fresh()->package_id)->toBe($pkg);
+
+    expect(fn () => $this->is->transition($this->tester, $second->id, $this->p->id, 'released', ['package_id' => null]))
+        ->toThrow(BusinessException::class, '已上線');
+    $this->travel(2)->minutes();
+    ($this->s)($this->tester)->post(route('issues.transition', $second->id), ['to' => 'released', 'package_id' => null])->assertSessionHas('ok');
+    expect(Package::findOrFail($pkg)->released_at->equalTo($releasedAt))->toBeTrue()
+        ->and($second->fresh()->released_at->greaterThan($releasedAt))->toBeTrue();
+
+    ($this->s)($this->dev)->post(route('issues.transition', $outsider->id), array_replace($handoff, ['package_id' => null, 'new_package_name' => '新建送測']))
+        ->assertSessionHas('ok');
+    expect($outsider->fresh()->status)->toBe('test_pending')->and($outsider->fresh()->package->name)->toBe('新建送測');
+});
+
+it('detects historical release evidence when the package timestamp is missing', function (string $status, bool $withTimestamp) {
+    $makeReady = function (string $title) {
+        $i = $this->is->createInternal($this->pm, $this->p->id, 'pm', ['title' => $title, 'content_html' => '<p>x</p>']);
+        ($this->toDev)($i);
+
+        return $i;
+    };
+    [$historical, $waiting, $outsider] = [$makeReady('A'), $makeReady('B'), $makeReady('C')];
+    $pkg = $this->is->createPackage($this->dev, $this->p->id, '歷史版本');
+    $this->is->addToPackage($this->dev, $this->p->id, $pkg, [$historical->id, $waiting->id], $this->tester->id);
+    DB::table('issues')->where('id', $historical->id)->update(['status' => $status, 'released_at' => $withTimestamp ? now() : null]);
+    expect(Package::findOrFail($pkg)->released_at)->toBeNull();
+    expect(fn () => $this->is->addToPackage($this->dev, $this->p->id, $pkg, [$outsider->id], $this->tester->id))
+        ->toThrow(BusinessException::class, '更新包 歷史版本 已上線');
+    expect(fn () => $this->is->removeFromPackage($this->dev, $this->p->id, $pkg, $waiting->id))
+        ->toThrow(BusinessException::class, '更新包 歷史版本 已上線');
+    ($this->s)($this->dev)->get(route('dev.index'))->assertOk()->assertSee('歷史版本')->assertSee('已上線')
+        ->assertDontSee(route('dev.packages.issues.remove', [$pkg, $waiting->id]));
+    ($this->s)($this->dev)->get(route('issues.show', $outsider->id))->assertOk()->assertDontSee('歷史版本');
+})->with([
+    'released status alone' => ['released', false],
+    'issue release timestamp alone' => ['release_pending', true],
+]);

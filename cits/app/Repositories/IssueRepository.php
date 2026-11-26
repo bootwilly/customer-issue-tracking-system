@@ -137,14 +137,48 @@ class IssueRepository
         return Package::create(['project_id' => $projectId, 'name' => $name, 'built_at' => now(), 'created_by' => $userId]);
     }
 
-    public function findPackage(int $id): ?Package
+    public function findPackageForUpdate(int $id): ?Package
     {
-        return Package::find($id);
+        return Package::whereKey($id)->lockForUpdate()->first();
     }
 
-    public function packages(int $projectId): Collection
+    public function markPackageReleased(Package $package, \DateTimeInterface $at): void
     {
-        return Package::where('project_id', $projectId)->orderByDesc('id')->limit(100)->get();
+        $package->fill(['released_at' => $at])->save();
+    }
+
+    /** Historical packages may lack their own release timestamp. */
+    private function releasedIssue(Builder $query, array $releasedCodes): void
+    {
+        $query->where(fn (Builder $q) => $q->whereNotNull('released_at')->orWhereIn('status', $releasedCodes));
+    }
+
+    public function hasReleasedPackageIssue(Package $package, array $releasedCodes): bool
+    {
+        $issues = $package->issues()->getQuery()->reorder();
+        $this->releasedIssue($issues, $releasedCodes);
+
+        return $issues->exists();
+    }
+
+    public function packageWithReleaseState(int $projectId, int $id, array $releasedCodes): ?Package
+    {
+        return Package::where('project_id', $projectId)->whereKey($id)
+            ->withExists(['issues as has_released_issue' => fn (Builder $q) => $this->releasedIssue($q, $releasedCodes)])
+            ->first();
+    }
+
+    public function packages(int $projectId, array $releasedCodes, bool $openOnly = false): Collection
+    {
+        $released = fn (Builder $q) => $this->releasedIssue($q, $releasedCodes);
+        $query = Package::where('project_id', $projectId)->orderByDesc('id');
+        if ($openOnly) {
+            $query->whereNull('released_at')->whereDoesntHave('issues', $released);
+        } else {
+            $query->withExists(['issues as has_released_issue' => $released]);
+        }
+
+        return $query->limit(100)->get();
     }
 
     /**
@@ -164,9 +198,13 @@ class IssueRepository
      *
      * @param  string[]  $statuses
      */
-    public function inStatuses(int $projectId, array $statuses, int $limit = 300): Collection
+    public function packageCandidates(int $projectId, array $statuses, array $releasedCodes): Collection
     {
-        return Issue::where('project_id', $projectId)->whereIn('status', $statuses ?: [''])->with('tester:id,name')
-            ->orderByDesc('id')->limit($limit)->get(['id', 'issue_no', 'title', 'status', 'package_id', 'assignee_test_id']);
+        return Issue::where('project_id', $projectId)->whereIn('status', $statuses)->whereNull('released_at')
+            ->whereNotIn('status', $releasedCodes)
+            ->whereDoesntHave('package', fn (Builder $q) => $q->where(fn (Builder $package) => $package->whereNotNull('released_at')
+                ->orWhereHas('issues', fn (Builder $issues) => $this->releasedIssue($issues, $releasedCodes))))
+            ->with('tester:id,name')->orderByDesc('id')->limit(300)
+            ->get(['id', 'issue_no', 'title', 'status', 'package_id', 'assignee_test_id']);
     }
 }

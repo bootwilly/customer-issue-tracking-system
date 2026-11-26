@@ -158,7 +158,7 @@ class PmQueryService
             'clientComments' => $this->repo->commentsOfTickets($i->tickets->pluck('id')->all()),
             'devUsers' => $needs('assignee_dev_id') ? $this->usersWith($projectId, 'dev.manage') : collect(),
             'testUsers' => $needs('assignee_test_id') ? $this->usersWith($projectId, 'test.manage') : collect(),
-            'packages' => $needs('package_id') ? $this->issueSvc->packages($projectId) : collect(),
+            'packages' => $needs('package_id') ? $this->issueSvc->packages($projectId, $i->package_id) : collect(),
             'processTypes' => $this->wf->lookups('process_type'),
             'mesPages' => $this->repo->mesPages($projectId),
             'statusMeta' => $this->wf->status('issue', $i->status),

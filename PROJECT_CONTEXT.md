@@ -151,7 +151,7 @@ Status: P1 deployed to production (https://<domain>/mescits/). P2 features in pr
 - Watchers: every ticket/issue notification goes through WatchService (internal link /pm/tickets/{id}, client link /tickets/{id}); never the actor, never non-members; clients cannot watch issues.
 - Client progress: lookup client_progress; slowest non-excluded linked issue decides; never expose internal issue numbers/status names to clients.
 - PM ticket list scope param tt = client_tab code or all; only_action applies to the default scope only. Client close notifies acceptor + ticket.settle + watchers.
-- Packages: many issues per package; batch add only DEV/TEST open issues; released package frozen; released issue cannot leave.
+- Packages: many issues per package; batch add only DEV/TEST open issues. The first member confirmed released freezes membership. Remaining members can finish release individually. Existing packages with a released member follow the same rule.
 - Dependencies: blocks kind gates PM->DEV dispatch until upstream is released/excluded; no cycles; test-origin issues cannot be blocked.
 
 ## Production cron (2026-11-26)

@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Repositories\EventRepository;
 use App\Repositories\ProjectRepository;
 use App\Repositories\SettingRepository;
+use App\Repositories\UserRepository;
 use App\Repositories\WatchRepository;
 use App\Services\WorkflowService;
 use Illuminate\Support\Collection;
@@ -26,6 +27,7 @@ class WatchService
         private ProjectRepository $projects,
         private SettingRepository $settings,
         private WorkflowService $wf,
+        private UserRepository $users,
     ) {}
 
     public function canWatchTicket(User $u, ClientTicket $t): bool
@@ -94,20 +96,31 @@ class WatchService
     }
 
     /**
-     * Ticket notification: the given internal / client recipients plus watchers of the matching side, without the actor.
+     * Ticket notification: the given recipients plus eligible watchers, without the actor.
      *
      * @param  array<int|null>  $internalIds
      * @param  array<int|null>  $clientIds
      */
-    public function notifyTicket(ClientTicket $t, string $title, ?int $actorId, array $internalIds, array $clientIds): void
+    public function notifyTicket(ClientTicket $t, string $title, ?int $actorId, array $internalIds, array $clientIds, bool $internalOnly = false): void
     {
-        $watchers = $this->capped($this->repo->watchers('ticket', $t->id), $t->project_id);
-        $internal = array_merge($internalIds, $watchers->filter(fn (User $w) => $w->seesInternal())->pluck('id')->all());
-        $client = array_merge($clientIds, $watchers->reject(fn (User $w) => $w->seesInternal())->pluck('id')->all());
+        $watchers = $this->ticketWatchers($t);
         $drop = fn (array $ids) => array_values(array_diff(array_unique(array_map('intval', array_filter($ids))), [(int) $actorId]));
+        if ($internalOnly) {
+            $watchers = $watchers->filter(fn (User $w) => $w->seesInternal());
+            $internalIds = $this->users->notificationUsers($drop($internalIds))
+                ->filter(fn (User $u) => $u->seesInternal() && $this->inProject($u, $t->project_id))
+                ->pluck('id')->all();
+        }
+        $watchers = $this->capped($watchers, $t->project_id);
+        $internal = array_merge($internalIds, $watchers->filter(fn (User $w) => $w->seesInternal())->pluck('id')->all());
         $internal = $drop($internal);
-        $client = array_values(array_diff($drop($client), $internal));
         $this->events->notify($internal, $t->project_id, $title, "/pm/tickets/{$t->id}", $this->mail());
+        if ($internalOnly) {
+            return;
+        }
+
+        $client = array_merge($clientIds, $watchers->reject(fn (User $w) => $w->seesInternal())->pluck('id')->all());
+        $client = array_values(array_diff($drop($client), $internal));
         $this->events->notify($client, $t->project_id, $title, "/tickets/{$t->id}", $this->mail());
     }
 
@@ -124,7 +137,12 @@ class WatchService
     {
         $max = max(1, $this->settings->int('watch.max_recipients', 50));
 
-        return $watchers->filter(fn (User $w) => $w->is_admin || $this->projects->isMember($projectId, $w->id))->take($max)->values();
+        return $watchers->filter(fn (User $w) => $this->inProject($w, $projectId))->take($max)->values();
+    }
+
+    private function inProject(User $user, int $projectId): bool
+    {
+        return $user->is_admin || $this->projects->isMember($projectId, $user->id);
     }
 
     private function mail(): bool

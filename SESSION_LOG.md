@@ -466,3 +466,11 @@
 - Public repo https://github.com/bootwilly/customer-issue-tracking-system (branch master, single commit 4ba620c). Author set repo-locally to bootwilly <id+bootwilly@users.noreply.github.com>; NOTICE copyright "2026 bootwilly". Pre-push scan: no real domain / cPanel user / local paths / personal email in tracked files.
 - Remote: origin (https). Future pushes only when the user says so.
 - Portability fixes (not committed): build.py app_dir config (CITS_APP_DIR, default app/mescits), ASSET_URL derived from app_url path, cross-platform npm; make_upgrade_sql.php baseline optional + --applied-file / --no-baseline; docs no longer depend on ADMIN_PASSWORD.local.txt; root README.md (architecture, deployment routes, license notes).
+
+## 2026-11-26 Ticket audience, package release and demo hand-off
+
+- Internal settlement notifications filter direct recipients and watchers by account audience and project access. Public ticket updates keep customer watchers.
+- The first issue confirmed released freezes package membership in the same transaction. Subsequent issues can finish in that package. Historical release evidence protects unstamped packages without a data migration. New package creation rolls back if hand-off fails.
+- DemoSeeder supplies the existing project tester during hand-off. Existing partially seeded projects keep the existing skip behavior.
+- Updated the online and offline manuals. Unit suite: 2 passed, 17 assertions. Additional mock service checks exercised first and subsequent releases, refused add and withdrawal. Package list and candidate queries ran on a read-only local SQLite connection. Changed Blade views compiled.
+- Feature tests were added but not run: the suite uses RefreshDatabase and writes fixtures. DemoSeeder was checked against the workflow without executing it. No deployment or database changes.

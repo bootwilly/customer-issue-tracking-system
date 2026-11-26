@@ -60,7 +60,7 @@ class DemoSeeder extends Seeder
         $is->transition($pm, $i3->id, $p->id, 'dev_todo', ['assignee_dev_id' => $dev->id]);
         $pkg = $is->createPackage($dev, $p->id, 'MES_v2.3.1_20261120');
         $is->transition($dev, $i3->id, $p->id, 'dev_doing', ['planned_due' => now()->subDay()->toDateString()]);
-        $is->transition($dev, $i3->id, $p->id, 'test_pending', ['package_id' => $pkg]);
+        $is->transition($dev, $i3->id, $p->id, 'test_pending', ['package_id' => $pkg, 'assignee_test_id' => $test->id]);
         $is->transition($test, $i3->id, $p->id, 'test_doing');
         $is->transition($test, $i3->id, $p->id, 'release_pending', ['release_planned_at' => now()->toDateString()]);
         $is->transition($test, $i3->id, $p->id, 'released');
