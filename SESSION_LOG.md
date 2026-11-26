@@ -514,3 +514,4 @@
 - Layout JS timer shares last activity via localStorage across tabs; warns 2 min before; GET /session/ping keeps alive.
 - No SQL needed on production (code default). Use now()->getTimestamp() not time() so tests can travel().
 - Tests 221/221. Not yet committed/deployed.
+- DEPLOYED 54aafc7 2026-11-27 ~00:05 Asia/Taipei, snapshot snap-20261126z: tests 221/221, app.zip 7509 files (7502 written, env kept), 1 new css asset, manifests md5 match, 99/99 assets 200, 4 remote files md5 match snapshot. Smoke: admin/internal/client codes as expected, layout timer present; idle probe (session idle.last_at = now-61min) redirected to login and session was invalidated. Logs unchanged. No SQL.
