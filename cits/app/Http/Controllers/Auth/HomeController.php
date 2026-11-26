@@ -14,7 +14,7 @@ class HomeController extends Controller
         $user = $request->user();
 
         if (! $user) {
-            return view('auth.login');
+            return view('auth.login', ['canRemember' => $auth->idleMinutes() === 0]);
         }
 
         return redirect()->route($auth->landingRoute($user, $project->id()));

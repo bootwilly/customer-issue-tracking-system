@@ -359,6 +359,7 @@ return [
         ['password.min_length', '6'],
         ['login.max_attempts', '5'],
         ['login.decay_minutes', '15'],
+        ['session.idle_minutes', '60'],
         ['ticket.edit_lock_minutes', '5'],
         ['attachment.max_mb', '100'],
         ['export.max_rows', '5000'],

@@ -56,6 +56,12 @@ class AuthService
         return $this->settings->int('password.min_length', 6);
     }
 
+    /** Minutes without a request before the user is signed out; 0 turns the limit (and its ban on "remember me") off. */
+    public function idleMinutes(): int
+    {
+        return max(0, $this->settings->int('session.idle_minutes', 60));
+    }
+
     /** @return array{ok: bool, message: ?string} */
     public function attempt(string $login, string $password, string $ip, bool $remember = false): array
     {
@@ -82,7 +88,7 @@ class AuthService
         }
 
         RateLimiter::clear($key);
-        Auth::login($user, $remember);
+        Auth::login($user, $remember && $this->idleMinutes() === 0);
         $this->users->touchLogin($user);
 
         return ['ok' => true, 'message' => null];

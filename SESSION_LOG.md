@@ -503,3 +503,14 @@
 - Added a header shortcut and an always-visible Markdown card above meeting notes. Editors upload batches independently; the page refreshes only the document list. Staff uploads default to internal. Prior note links keep their visibility rules.
 - New batches use existing attachment ownership with a dedicated context. A file validation failure leaves staged files temporary for scheduled cleanup. No schema change.
 - Local unit suite passed (9 tests, 64 assertions), routes registered, Blade compiled and the /mescits Vite build passed. Offline HTML and PDF manuals regenerated. No deployment or commit.
+
+## 2026-11-26 Standalone meeting Markdown production deployment
+- IN PROGRESS: ffa3a3d. Remote feature branch verified; exact snapshot 218/218 tests, 3811 assertions on isolated memory SQLite. Additional multi-role batch workflow 31 assertions. Browser fixture passed. Seven production files and both manifests backed up, one new path checked.
+- DONE 2026-11-26 18:55:14 Asia/Taipei. Deployed ffa3a3d from WillyNB/meeting-markdown-documents. Production SHA-256 verified for 8 application/manual files, 99 compiled assets and both manifests. Canonical manifests and new asset URLs matched. Batch endpoint GET returned 405 with Allow POST. Guests redirected to login for meetings, document preview/download and manual. Log listing unchanged. No production schema migration or real-user uploads. Rollback files and hashes retained under %LOCALAPPDATA%/CITS/deployment-backups/ffa3a3d.
+
+## 2026-11-26 Idle auto logout
+- LogoutWhenIdle middleware (web group, appended): session key idle.last_at, setting session.idle_minutes (default 60 in code, 0 = off).
+- Header X-CITS-Background = not activity (edit-lock heartbeat). Remember-me disabled/refused while limit on.
+- Layout JS timer shares last activity via localStorage across tabs; warns 2 min before; GET /session/ping keeps alive.
+- No SQL needed on production (code default). Use now()->getTimestamp() not time() so tests can travel().
+- Tests 221/221. Not yet committed/deployed.

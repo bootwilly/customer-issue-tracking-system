@@ -20,6 +20,7 @@ Route::middleware('guest')->group(function () {
 
 Route::middleware(['auth', 'active'])->group(function () {
     Route::post('/logout', [LoginController::class, 'destroy'])->name('logout');
+    Route::get('/session/ping', [LoginController::class, 'ping'])->name('session.ping');
 
     Route::get('/account/password', [PasswordController::class, 'edit'])->name('password.edit');
     Route::put('/account/password', [PasswordController::class, 'update'])->name('password.update');

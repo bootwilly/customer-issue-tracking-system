@@ -11,7 +11,7 @@
     <div x-data="{ type: @js(old('ticket_type', $ticket->ticket_type)), anomalyTypes: @js($anomalyTypes), lost: false }"
          x-init="setInterval(async () => {
             try {
-                const r = await fetch('{{ route('tickets.heartbeat', $ticket->id) }}', { method: 'POST', headers: { 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' } });
+                const r = await fetch('{{ route('tickets.heartbeat', $ticket->id) }}', { method: 'POST', headers: { 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json', 'X-CITS-Background': '1' } });
                 const j = await r.json(); if (!j.ok) lost = true;
             } catch (e) {}
          }, 60000)">

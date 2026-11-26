@@ -88,6 +88,43 @@
     @include('layouts._flash')
     @yield('content')
 </main>
+@auth
+    @inject('idleAuth', 'App\Services\AuthService')
+    @if ($idleAuth->idleMinutes() > 0)
+        <div id="idle-warn" hidden class="fixed inset-x-0 bottom-4 z-50 mx-auto w-fit rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-lg">
+            閒置過久，將於 <span id="idle-left"></span> 秒後自動登出。
+            <button type="button" id="idle-stay" class="ml-2 rounded-md bg-amber-600 px-3 py-1 text-white hover:bg-amber-700">繼續使用</button>
+        </div>
+        <script>
+            (function () {
+                const limit = {{ $idleAuth->idleMinutes() }} * 60000, warnAt = limit - 120000, key = 'cits.idle.last';
+                const warn = document.getElementById('idle-warn'), left = document.getElementById('idle-left');
+                const touch = () => { try { localStorage.setItem(key, String(Date.now())); } catch (e) {} };
+                const last = () => { try { return Number(localStorage.getItem(key)) || 0; } catch (e) { return 0; } };
+                let mine = Date.now();
+                touch();
+                // Requests from this page refresh the server-side clock too, except background timers.
+                const orig = window.fetch.bind(window);
+                window.fetch = function (input, init) {
+                    const h = new Headers((init && init.headers) || (input instanceof Request ? input.headers : undefined));
+                    const p = orig(input, init);
+                    if (!h.has('X-CITS-Background')) p.then(() => { mine = Date.now(); touch(); }, () => {});
+                    return p;
+                };
+                document.getElementById('idle-stay').addEventListener('click', () => {
+                    fetch(@js(route('session.ping')), { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
+                        .then((r) => { if (r.status === 401) location.href = @js(route('home')); });
+                });
+                setInterval(() => {
+                    const idle = Date.now() - Math.max(mine, last()); // other tabs share the session
+                    if (idle >= limit + 5000) { location.href = @js(route('home')); return; }
+                    warn.hidden = idle < warnAt;
+                    if (!warn.hidden) left.textContent = String(Math.max(0, Math.ceil((limit - idle) / 1000)));
+                }, 1000);
+            })();
+        </script>
+    @endif
+@endauth
 @stack('scripts')
 </body>
 </html>

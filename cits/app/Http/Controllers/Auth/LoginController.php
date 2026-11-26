@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Http\Middleware\LogoutWhenIdle;
 use App\Services\AuthService;
 use App\Support\CurrentProject;
 use Illuminate\Http\Request;
@@ -26,6 +27,7 @@ class LoginController extends Controller
         }
 
         $request->session()->regenerate();
+        $request->session()->put(LogoutWhenIdle::SESSION_KEY, now()->getTimestamp());
 
         $user = $request->user();
         $only = $this->auth->soleProjectId($user);
@@ -36,6 +38,12 @@ class LoginController extends Controller
         }
 
         return redirect()->route('projects.select');
+    }
+
+    /** "Keep me signed in" from the idle warning: the request itself refreshes the idle clock. */
+    public function ping()
+    {
+        return response()->json(['ok' => true]);
     }
 
     public function destroy(Request $request)
