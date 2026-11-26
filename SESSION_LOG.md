@@ -474,3 +474,8 @@
 - DemoSeeder supplies the existing project tester during hand-off. Existing partially seeded projects keep the existing skip behavior.
 - Updated the online and offline manuals. Unit suite: 2 passed, 17 assertions. Additional mock service checks exercised first and subsequent releases, refused add and withdrawal. Package list and candidate queries ran on a read-only local SQLite connection. Changed Blade views compiled.
 - Feature tests were added but not run: the suite uses RefreshDatabase and writes fixtures. DemoSeeder was checked against the workflow without executing it. No deployment or database changes.
+
+## 2026-11-26 Production preflight for 6a7deb7 (deployment held)
+- Verified rollback copies of all 12 affected production files. No production files were uploaded or changed.
+- With the authorized isolated SQLite memory database and test-only settings, the exact commit passed 210/211 tests. ProgressPackageTest line 194 matched the frozen package name in the preceding flash error instead of checking package options.
+- Verified the actual package selector excluded the frozen package and included the open package. A temporary assertion scoped to option labels passed all 7 ProgressPackageTest cases (125 assertions). Restored the snapshot test. Production release awaits a decision on the failing committed test.

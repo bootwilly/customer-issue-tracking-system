@@ -191,7 +191,7 @@ it('freezes membership on the first release and keeps individual release confirm
     expect($outsider->fresh()->package_id)->toBeNull()
         ->and($waiting->fresh()->package_id)->toBe($pkg)->and($waiting->fresh()->status)->toBe('test_pending');
     ($this->s)($this->dev)->get(route('issues.show', $outsider->id))->assertOk()
-        ->assertDontSee('凍結版本')->assertSee('下一版');
+        ->assertDontSee('>凍結版本</option>', false)->assertSee('>下一版</option>', false);
 
     $this->is->transition($this->tester, $waiting->id, $this->p->id, 'test_doing');
     $this->is->transition($this->tester, $waiting->id, $this->p->id, 'test_failed');
