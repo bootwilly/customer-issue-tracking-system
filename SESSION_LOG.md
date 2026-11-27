@@ -583,7 +583,7 @@
 - Importer can now target ONLY this standard format: no header aliases, no title regex, no category mapping, no fuzzy page matching.
 - pwsh 7 COM gotchas: Range.Value2 refuses object[,] and int (write cell by cell with [string]/[double]); BuiltinDocumentProperties null; automation EXCEL.EXE may linger, stop only '/automation -Embedding' processes.
 
-## 2026-11-27 PM issue Excel import (standard template only) - implemented, not committed/deployed
+## 2026-11-27 PM issue Excel import (standard template only)
 - Standard template v1 (sheets list/help/hidden lists with template_version cell); headers, sheet names, status values and skip list come from lookups (issue_import_*). Importer refuses files without the version marker or required headers.
 - Flow: chunked upload (context issue:import) -> preview JSON (no writes) -> browser composes each picture + overlay shapes (or loose shape groups) into PNG, uploads via /uploads/image with context issue:import:{file}:{no} -> apply re-parses and creates all chosen rows in one transaction via IssueService::createInternal (origin pm, status new). Changed rows (content_hash differs) can be written as addendum. Dedupe table issue_import_rows (project, source, source_no).
 - FINDING: in this workbook many pictures have stale a:xfrm (e.g. sheet 34 picture xfrm at row 41, anchor at row 5). Excel draws from the cell anchors. Reader now uses anchors for top-level objects, xfrm only inside groups. Verified 44 objects against Excel COM Shape.Top/Left/Width/Height (match to 0.1 pt).
@@ -591,3 +591,6 @@
 - Tests 270/270, pint ok, vite build ok. Manual 04-pm 4.8 + offline HTML/PDF regenerated. Upgrade SQL deploy/out/upgrade-20261127-0906.sql must run before deploy.
 - Shared workbook updated with template_version=1 (scratchpad only, contains client data, not in repo).
 - Not done: Laravel Boost install requested by cits/CLAUDE.md (would change composer.json/lock; needs user OK and full redeploy).
+- DEPLOYED 69ac26e 2026-11-27 ~17:40 Asia/Taipei (pushed to origin/master). SQL: user ran the minimal statements (table + migration row + new lookups/settings only; the full upgrade-20261127-0906.sql was NOT used because its role_has_permissions INSERT IGNORE would re-grant permissions an admin removed). Verified read-only: 17 migrations, table utf8mb4_uca1400_ai_ci, unique (3 cols) + 3 FKs, 33 issue_import_* lookups + event_label imported + lookup_editable, 4 settings, header text bytes correct.
+- Backup of the 5 changed app files + manifest (prod matched 401f652 exactly): %LOCALAPPDATA%/CITS/deployment-backups/69ac26e/before. Extractor (POST + X-Deploy-Token): 7532 files, env kept, stale routes 0, self deleted, 2nd POST 404. public/ 107 files. Downloaded 4 app files md5 = commit; manifest md5 match; 101/101 assets 200; import JS md5 match. Guest: /pm, /pm/issues/import, /template, /media -> 302 to home (login form 200); POST preview/apply -> 419. No new log file, no extractor/zip left.
+- Not done: authenticated smoke test (AI does not sign in to production); user to check /pm button, template download and a preview of the shared workbook.
