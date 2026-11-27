@@ -123,7 +123,7 @@ cp deploy/out/install.sql deploy/out/install-$(date +%Y%m%d).sql
    - 第一次部署時，`app/mescits/.env` 還不存在，解壓程式會把 `env.production` 範本裝成 `.env`，裡面的 APP_KEY 是隨機產生的。
 6. **補上 `.env` 的資料庫密碼**：`DB_PASSWORD` 在範本裡是空的。用 WebDAV 下載 `app/mescits/.env`，填好再上傳；或是用 cPanel 的檔案管理員直接編輯。**不要讓 AI 經手密碼。**
    - 如果網域或子目錄不同，也要改 `APP_URL`；建置時的 `ASSET_URL` 也要對應修改。
-7. **draw.io**（需要流程圖功能時）：在快照執行 `python -I deploy/build.py --no-npm --drawio`，上傳 `drawio.zip` 和 `xd_*.php` 到 `webdav-demo` 的 `/`，再呼叫 `extractor_drawio.txt` 裡寫的網址。
+7. **draw.io**（需要流程圖功能時）：快照要另外把 `cits\public\drawio` 複製進去（步驟 1 預設排除），在快照執行 `python -I deploy/build.py --no-npm --drawio`。`drawio.zip` 上傳到 `webdav-app` 的 `/`（私有目錄，和 app.zip 一樣），`xd_*.php` 上傳到 `webdav-demo` 的 `/`，再用和 app 解壓程式一樣的方式呼叫（POST 加 `X-Deploy-Token` 標頭，見第 6 節步驟 5）。解壓時會刪除 `onedrive3.html`、`teams.html`（`DRAWIO_DROP`）。
 8. **上線後設定**：做第 9 節（管理員改密碼、郵件、cron、建立專案和成員）。
 9. **驗證**：做第 7 節。
 
@@ -170,6 +170,7 @@ robocopy "$R\cits" "$S\cits" /E /NFL /NDL /NJH /NP /XD "$R\cits\vendor" "$R\cits
 robocopy "$R\docs\manual" "$S\docs\manual" /E /NFL /NDL /NJH /NP /XD "$R\docs\manual\dist"
 New-Item -ItemType Directory -Force "$S\deploy" | Out-Null
 Copy-Item "$R\deploy\build.py" "$S\deploy\build.py"
+Copy-Item "$R\deploy\deploy.local.json" "$S\deploy\deploy.local.json"   # 本機設定（php、composer 路徑、網址），少了會打包失敗
 robocopy "$R\cits\vendor" "$S\cits\vendor" /E /NFL /NDL /NJH /NP /MT:16      # vendor 要實際複製
 New-Item -ItemType Junction -Path "$S\cits\node_modules" -Target "$R\cits\node_modules" | Out-Null
 foreach ($d in 'app\private','app\public','framework\cache\data','framework\sessions','framework\views','framework\testing','logs') { New-Item -ItemType Directory -Force "$S\cits\storage\$d" | Out-Null }
@@ -182,7 +183,7 @@ foreach ($d in 'app\private','app\public','framework\cache\data','framework\sess
 ```bash
 cd "$S" && find cits docs deploy -type f -not -path "*/vendor/*" -not -path "*/node_modules/*" -print0 | sort -z | xargs -0 md5sum > ../snap.md5
 cd cits && ASSET_URL=/mescits npm run build          # Windows 上是 npm.cmd
-php artisan test                                      # 必須全過（目前 250 個）
+php artisan test                                      # 必須全過（目前 256 個）
 ```
 - `ASSET_URL=/mescits` 一定要帶，否則前端檔路徑會錯。
 - 測試沒全過就停止部署。
@@ -221,11 +222,13 @@ python -I deploy/build.py --no-npm
 3. **執行解壓**：
    ```bash
    F=$(sed -n 1p deploy/out/extractor.txt | tr -d '\r'); T=$(sed -n 2p deploy/out/extractor.txt | tr -d '\r')
-   curl -s --max-time 300 "https://example.com/mescits/$F?t=$T"
-   # 預期：files written = 7xxx / env kept = yes / zip deleted = yes / self deleted = yes
-   curl -s -o /dev/null -w "%{http_code}\n" "https://example.com/mescits/$F?t=$T"   # 預期 404
+   curl -s --max-time 300 -X POST -H "X-Deploy-Token: $T" "https://example.com/mescits/$F"
+   # 預期：files written = 7xxx / env kept = yes / zip deleted = yes / stale route files removed = 0 / self deleted = yes
+   curl -s -o /dev/null -w "%{http_code}\n" -X POST -H "X-Deploy-Token: $T" "https://example.com/mescits/$F"   # 預期 404
    ```
-   - `extractor.txt` 是**兩行**，不要把兩行直接接起來當網址。
+   - `extractor.txt` 是**兩行**：第 1 行檔名，第 2 行 token。2026-11-27 起 token 只接受 POST 的 `X-Deploy-Token` 標頭（放在網址會留在主機的 access log），GET 一律 404。
+   - 解壓程式一次只能跑一個（flock），不論成功、出錯或逾時都會自刪；失敗時要重新打包、上傳新的解壓程式。
+   - `routes/` 底下 zip 裡沒有的檔案會被刪除（路由是用 glob 載入的，舊檔不刪會一直生效）。
    - 解壓時會略過 `storage/`（只補 .gitignore），附件、log、session 都不會被覆蓋。
    - 解壓會清掉 `bootstrap/cache` 裡除了 packages 和 services 以外的快取檔。
 4. **最後上傳 manifest**：
@@ -338,6 +341,7 @@ python -I deploy/build.py --no-npm
 | 11-27 | 登入紀錄（含來源 IP，`auth_logs`） | upgrade-20261126-1633.sql |
 | 11-27 | 依帳號的登入限制、附件類型、顯示時再過濾 HTML、安全標頭 | upgrade-20261126-1700.sql |
 | 11-27 | 資安稽核修補兩批（Host 竄改、跨專案引用、行內 JS 跳脫、會議單號外洩、圖片路徑、drawio、附件權限、改密碼登出其他 session 等） | 無 |
+| 11-27 | 資安稽核第三批（郵件設定、會議預覽 CSP、草稿、匯出、刪除使用者、`.htaccess`、解壓程式改 POST、drawio 設定） | 無 |
 | 11-27 00:05 | 閒置 60 分鐘自動登出（54aafc7） | 無 |
 
 ---

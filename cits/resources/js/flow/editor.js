@@ -64,7 +64,10 @@ if (root) {
         }
         setStatus('儲存中…');
         const body = new FormData(form);
-        body.set('source_md', svg);
+        // Sent as a file part: the host answers HTTP 413 to multipart text fields over about 1 MB, while file
+        // parts are not limited that way (large diagrams easily pass 1 MB of SVG).
+        body.delete('source_md');
+        body.set('source_file', new Blob([svg], { type: 'image/svg+xml' }), 'flow.svg');
         try {
             const res = await fetch(form.action, {
                 method: 'POST',

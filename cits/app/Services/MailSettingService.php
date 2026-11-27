@@ -41,6 +41,11 @@ class MailSettingService
     public function update(User $actor, array $data, ?string $newPassword, bool $clearPassword): void
     {
         $changed = [];
+        // the stored password belongs to the old server: never send it to a new host
+        $hostChanged = (string) $this->settings->get('mail.host') !== (string) ($data['host'] ?? '');
+        if ($hostChanged && ($newPassword === null || $newPassword === '')) {
+            $clearPassword = true;
+        }
         foreach (self::PLAIN as $k) {
             $v = $k === 'enabled' ? (empty($data[$k]) ? '0' : '1') : (string) ($data[$k] ?? '');
             if ($this->settings->get("mail.$k") !== $v) {

@@ -38,7 +38,7 @@ class SitemapParser
             libxml_clear_errors();
             libxml_use_internal_errors($prev);
         }
-        $root = $ok ? $dom->documentElement : null;
+        $root = $ok && $dom->doctype === null ? $dom->documentElement : null;
         if (! $root || strtolower($root->localName) !== 'sitemap') {
             throw new BusinessException('不是有效的 Web.sitemap（根節點必須是 siteMap）。');
         }

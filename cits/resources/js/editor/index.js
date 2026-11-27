@@ -98,7 +98,17 @@ function fmtSize(n) {
 }
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
-const localKey = (ctx) => `cits:draft:${ctx}`;
+// Browser-side drafts belong to the signed-in account: keys carry its id, and keys of other accounts (or the
+// old id-less format) are dropped, so a shared computer never offers one person's draft to the next.
+const DRAFT_PREFIX = 'cits:draft:';
+const draftUser = document.querySelector('meta[name="cits-user"]')?.content || '';
+const localKey = (ctx) => `${DRAFT_PREFIX}${draftUser}:${ctx}`;
+try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith(DRAFT_PREFIX) && !k.startsWith(`${DRAFT_PREFIX}${draftUser}:`)) localStorage.removeItem(k);
+    }
+} catch (_) {}
 
 function init(root) {
     if (root.dataset.editorReady) return;

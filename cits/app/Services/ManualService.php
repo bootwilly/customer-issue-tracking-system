@@ -18,6 +18,9 @@ class ManualService
 
     private const MARKER = '/^<!-- \/?internal -->[ \t]*(\R|\z)/m';
 
+    /** Any opening marker still present after the complete blocks were removed, wherever it sits on the line. */
+    private const LEFTOVER = '/<!--\s*internal\s*-->/i';
+
     /** resources/manual on the server (copied by deploy/build.py), docs/manual in the repository. */
     public function dir(): string
     {
@@ -93,7 +96,16 @@ class ManualService
             return null;
         }
 
+        $md = (string) file_get_contents($path);
+        if (! $u->seesInternal()) {
+            $md = (string) preg_replace(self::BLOCK, '', $md);
+            // fail closed: an opening marker left over (indented, misspelt closing line, never closed) hides the rest
+            if (preg_match(self::LEFTOVER, $md, $m, PREG_OFFSET_CAPTURE)) {
+                $md = substr($md, 0, $m[0][1]);
+            }
+        }
+
         // Marker lines are removed for everyone: a comment line inside a table would break the table.
-        return preg_replace(! $u->seesInternal() ? [self::BLOCK, self::MARKER] : [self::MARKER], '', (string) file_get_contents($path));
+        return (string) preg_replace(self::MARKER, '', $md);
     }
 }

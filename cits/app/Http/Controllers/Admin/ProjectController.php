@@ -46,7 +46,8 @@ class ProjectController extends Controller
         return $request->validate([
             'code' => ['required', 'string', 'max:30', Rule::unique('projects', 'code')->ignore($project?->id)],
             'name' => ['required', 'string', 'max:100'],
-            'ticket_prefix' => ['required', 'string', 'max:10'],
+            // ticket / issue numbers are unique across projects, so the prefix must be too
+            'ticket_prefix' => ['required', 'string', 'max:10', Rule::unique('projects', 'ticket_prefix')->ignore($project?->id)],
             'status' => ['required', Rule::in(['active', 'inactive'])],
         ], [], ['code' => '專案代碼', 'name' => '專案名稱', 'ticket_prefix' => '單號前綴', 'status' => '狀態']);
     }

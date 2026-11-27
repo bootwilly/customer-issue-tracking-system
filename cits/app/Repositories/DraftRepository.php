@@ -24,6 +24,17 @@ class DraftRepository
         EditorDraft::query()->where('user_id', $userId)->where('context_key', $context)->delete();
     }
 
+    public function countFor(int $userId): int
+    {
+        return EditorDraft::query()->where('user_id', $userId)->count();
+    }
+
+    public function deleteOldestFor(int $userId, int $n): void
+    {
+        $ids = EditorDraft::query()->where('user_id', $userId)->orderBy('updated_at')->limit(max(0, $n))->pluck('context_key');
+        EditorDraft::query()->where('user_id', $userId)->whereIn('context_key', $ids)->delete();
+    }
+
     public function deleteOlderThan(\DateTimeInterface $cutoff): int
     {
         return EditorDraft::query()->where('updated_at', '<', $cutoff)->delete();

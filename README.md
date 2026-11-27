@@ -29,6 +29,8 @@
 - 反向代理只採用 `X-Forwarded-For` 和 `X-Forwarded-Proto`（不採用 Host／Port／Prefix，避免重設密碼連結被改成其他網域）。
 - 帳號的密碼在其他地方變更或重設後，其他 session 會被登出（`LogoutAfterPasswordChange`）。
 - 附件依所屬單據的檢視權限開放（`config/attachments.php`）；內文圖片只允許本站的 `/attachments/{id}`。
+- 公開目錄的 `.htaccess`：關閉目錄列表、不提供點開頭的檔案和 zip／sql／sqlite／bak／log，靜態檔也加上 nosniff 等標頭。
+- 部署解壓程式只接受 POST 加 `X-Deploy-Token` 標頭，一次只跑一個，結束一定自刪。
 
 ---
 
@@ -38,7 +40,7 @@
 - **後端**：PHP 8.3 以上（以 8.5 測試）、Laravel 13、spatie/laravel-permission（角色以專案為單位）、openspout（Excel）、symfony/html-sanitizer
 - **前端**：Blade、Alpine.js、Tailwind CSS 4、Vite；TipTap 編輯器；Mermaid；自架 draw.io
 - **資料庫**：MariaDB、MySQL（正式環境），SQLite（開發和測試）
-- **測試**：Pest（250 個 feature test）
+- **測試**：Pest（256 個 feature test）
 
 ### 分層
 ```

@@ -46,6 +46,8 @@ class OutboxService
             // tls = plain connect + STARTTLS (auto); ssl = implicit TLS; none = no encryption at all.
             'mail.mailers.smtp.scheme' => $enc === 'ssl' ? 'smtps' : 'smtp',
             'mail.mailers.smtp.auto_tls' => $enc !== 'none',
+            // "tls" must not silently fall back to plain text when the server (or a man in the middle) drops STARTTLS
+            'mail.mailers.smtp.require_tls' => $enc === 'tls',
             'mail.mailers.smtp.username' => $s('username'),
             'mail.mailers.smtp.password' => $s('password'),
             'mail.from.address' => $s('from_address', $s('username')),

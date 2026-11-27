@@ -25,7 +25,22 @@ class UserRepository
         'comment_reads' => ['user_id'],
         'user_notifications' => ['user_id'],
         'notification_outbox' => ['user_id'],
+        'project_flows' => ['updated_by'],
+        'project_flow_revisions' => ['created_by', 'deleted_by'],
+        'project_flow_editors' => ['created_by'],
+        'project_flow_draft_snapshots' => ['created_by'],
+        'meetings' => ['created_by', 'updated_by', 'deleted_by'],
+        'meeting_attendees' => ['user_id'],
+        'meeting_items' => ['owner_id', 'created_by', 'updated_by'],
+        'meeting_comments' => ['user_id', 'deleted_by'],
+        'ticket_needinfo' => ['requested_by', 'resolved_by'],
+        'issue_tags' => ['created_by'],
+        'issue_dependencies' => ['created_by'],
     ];
+
+    /** Rows that only exist for the user's own convenience: removed with the user (all have a foreign key to users). */
+    private const TRANSIENT_TABLES = ['project_members', 'editor_drafts', 'upload_sessions', 'api_tokens', 'meeting_reads',
+        'ticket_watchers', 'issue_watchers', 'saved_queries', 'project_flow_editors'];
 
     public function find(int $id): ?User
     {
@@ -90,9 +105,9 @@ class UserRepository
     {
         DB::table('model_has_roles')->where('model_id', $user->id)->where('model_type', $user->getMorphClass())->delete();
         DB::table('model_has_permissions')->where('model_id', $user->id)->where('model_type', $user->getMorphClass())->delete();
-        DB::table('project_members')->where('user_id', $user->id)->delete();
-        DB::table('editor_drafts')->where('user_id', $user->id)->delete();
-        DB::table('upload_sessions')->where('user_id', $user->id)->delete();
+        foreach (self::TRANSIENT_TABLES as $table) {
+            DB::table($table)->where('user_id', $user->id)->delete();
+        }
         $user->delete();
     }
 }

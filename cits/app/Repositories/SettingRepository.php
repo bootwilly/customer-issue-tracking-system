@@ -4,8 +4,10 @@ namespace App\Repositories;
 
 use App\Models\SystemSetting;
 use App\Models\WorkflowStatus;
+use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\Log;
 
 class SettingRepository
 {
@@ -16,7 +18,17 @@ class SettingRepository
             return $default;
         }
 
-        return $row->is_encrypted ? Crypt::decryptString($row->value) : $row->value;
+        if (! $row->is_encrypted) {
+            return $row->value;
+        }
+        try {
+            return Crypt::decryptString($row->value);
+        } catch (DecryptException) {
+            // APP_KEY changed since the value was saved: treat it as unset instead of failing every page that reads it
+            Log::warning("setting $key cannot be decrypted (APP_KEY changed?); treated as empty");
+
+            return $default;
+        }
     }
 
     public function int(string $key, int $default): int

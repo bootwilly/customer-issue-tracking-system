@@ -8,13 +8,10 @@ namespace App\Services;
  */
 class ContentService
 {
+    /** Always the whitelist sanitizer: there is no weaker fallback (strip_tags keeps attributes such as onclick). */
     public function clean(string $html): string
     {
-        if (class_exists(SanitizerService::class)) {
-            return app(SanitizerService::class)->clean($html);
-        }
-
-        return strip_tags($html, '<p><br><strong><em><ul><ol><li>');
+        return app(SanitizerService::class)->clean($html);
     }
 
     public function bind(string $html, string $ownerType, int $ownerId, ?string $context): void

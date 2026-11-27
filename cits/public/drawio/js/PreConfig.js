@@ -14,3 +14,10 @@ urlParams['sync'] = 'manual';
 // CITS: never talk to diagrams.net services
 urlParams['stealth'] = '1';
 urlParams['lockdown'] = '1';
+// CITS: no plugins and no PWA / service worker; drop URL parameters that load external code or storage
+// back-ends (p = plugin list, mode = Google Drive / OneDrive ..., gapi-stealth = Google API loader).
+urlParams['plugins'] = '0';
+urlParams['pwa'] = '0';
+delete urlParams['p'];
+delete urlParams['mode'];
+delete urlParams['gapi-stealth'];

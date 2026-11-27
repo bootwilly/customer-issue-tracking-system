@@ -149,10 +149,20 @@ class FlowController extends Controller
             'title' => ['required', 'string', 'max:200'],
             'format' => ['nullable', 'string', 'max:16'],
             // drawio SVG may carry pasted images; the real byte limit is the flow.*max_bytes setting checked in the service
-            'source_md' => ['required', 'string', 'max:12000000'],
+            'source_md' => ['required_without:source_file', 'nullable', 'string', 'max:12000000'],
+            // the online editor sends its SVG as a file (the host refuses text fields over about 1 MB)
+            'source_file' => ['nullable', 'file', 'max:12000'],
             'file_name' => ['nullable', 'string', 'max:255'],
             'base_rev' => ['nullable', 'integer', 'min:0'],
         ];
+    }
+
+    /** Diagram source: the uploaded file part when present, otherwise the text field. */
+    private function source(Request $r, array $d): string
+    {
+        $file = $r->file('source_file');
+
+        return $file ? (string) $file->get() : (string) ($d['source_md'] ?? '');
     }
 
     /** New flow (starts as a draft). */
@@ -161,7 +171,7 @@ class FlowController extends Controller
         $pid = $this->manager($r);
         $d = $r->validate($this->saveRules());
         try {
-            $f = $this->svc->create($r->user(), $pid, $d['format'] ?? 'mermaid', $d['source_md'], $d['title'], $d['file_name'] ?? null);
+            $f = $this->svc->create($r->user(), $pid, $d['format'] ?? 'mermaid', $this->source($r, $d), $d['title'], $d['file_name'] ?? null);
         } catch (BusinessException $e) {
             return $r->expectsJson() ? response()->json(['ok' => false, 'error' => $e->getMessage()], 422) : redirect()->route('flows.index')->with('err', $e->getMessage());
         }
@@ -175,7 +185,7 @@ class FlowController extends Controller
         $pid = $this->viewer($r);
         $d = $r->validate($this->saveRules());
         try {
-            [, $changed] = $this->svc->saveDraft($r->user(), $pid, $id, $d['source_md'], $d['title'], $d['file_name'] ?? null,
+            [, $changed] = $this->svc->saveDraft($r->user(), $pid, $id, $this->source($r, $d), $d['title'], $d['file_name'] ?? null,
                 isset($d['base_rev']) ? (int) $d['base_rev'] : null);
         } catch (BusinessException $e) {
             return $this->back($r, $id, $e->getMessage(), false);

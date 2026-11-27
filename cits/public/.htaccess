@@ -1,9 +1,17 @@
+# No directory listings, whatever modules are loaded (the host has no mod_negotiation, so -Indexes inside the
+# block below never applied there).
+Options -Indexes
+
 <IfModule mod_rewrite.c>
     <IfModule mod_negotiation.c>
-        Options -MultiViews -Indexes
+        Options -MultiViews
     </IfModule>
 
     RewriteEngine On
+
+    # Never serve dotfiles (except .well-known) or archives / dumps that could be left in the public folder.
+    RewriteRule (^|/)\.(?!well-known(/|$)) - [F,L]
+    RewriteRule \.(zip|sql|sqlite|bak|log)$ - [F,L,NC]
 
     # Handle Authorization Header
     RewriteCond %{HTTP:Authorization} .
@@ -15,6 +23,7 @@
 
     # Redirect Trailing Slashes If Not A Folder...
     RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_URI} !^//
     RewriteCond %{REQUEST_URI} (.+)/$
     RewriteRule ^ %1 [L,R=301]
 
@@ -22,4 +31,11 @@
     RewriteCond %{REQUEST_FILENAME} !-d
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteRule ^ index.php [L]
+</IfModule>
+
+# Static files (build assets, drawio) get the same basics as the PHP pages; headers PHP already set are kept.
+<IfModule mod_headers.c>
+    Header always setifempty X-Content-Type-Options "nosniff"
+    Header always setifempty X-Frame-Options "SAMEORIGIN"
+    Header always setifempty Referrer-Policy "strict-origin-when-cross-origin"
 </IfModule>

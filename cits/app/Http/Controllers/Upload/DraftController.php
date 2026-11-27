@@ -20,7 +20,7 @@ class DraftController extends Controller
 
     public function store(Request $request): JsonResponse
     {
-        $data = $request->validate(['context' => ['required', 'string', 'max:100'], 'html' => ['nullable', 'string']]);
+        $data = $request->validate(['context' => ['required', 'string', 'max:100'], 'html' => ['nullable', 'string', 'max:'.DraftService::MAX_HTML]]);
         $this->service->save($request->user()->id, $data['context'], $data['html'] ?? '');
 
         return response()->json(['ok' => true]);

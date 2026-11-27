@@ -154,20 +154,27 @@ def build_extractor():
     php = r"""<?php
 declare(strict_types=1);
 header('Content-Type: text/plain; charset=utf-8');
-if (!hash_equals('__TOKEN__', (string)($_GET['t'] ?? ''))) { http_response_code(404); exit; }
+// POST + header only: a token in the query string would end up in access logs.
+if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST' || !hash_equals('__TOKEN__', (string)($_SERVER['HTTP_X_DEPLOY_TOKEN'] ?? ''))) { http_response_code(404); exit; }
+// one run at a time; whatever happens next (error, timeout, fatal), the script removes itself
+$lock = fopen(__FILE__, 'r');
+if (!$lock || !flock($lock, LOCK_EX | LOCK_NB)) { http_response_code(409); echo "already running\n"; exit; }
+register_shutdown_function(function () { if (is_file(__FILE__)) { @unlink(__FILE__); } });
 @set_time_limit(300);
 $home = dirname(__DIR__, 2);
 $app = "$home/__APP_DIR__";
 $zipPath = "$app/app.zip";
 $out = [];
-if (!is_file($zipPath)) { echo "app.zip not found\n"; @unlink(__FILE__); exit; }
+if (!is_file($zipPath)) { echo "app.zip not found\n"; exit; }
 $zip = new ZipArchive();
 if ($zip->open($zipPath) !== true) { echo "zip open failed\n"; exit; }
 $keepEnv = is_file("$app/.env");
 $n = 0;
+$inZip = [];
 for ($i = 0; $i < $zip->numFiles; $i++) {
   $name = $zip->getNameIndex($i);
   if (str_contains($name, '..')) continue;
+  $inZip[$name] = true;
   if (str_starts_with($name, 'storage/') && !str_ends_with($name, '.gitignore')) continue;
   if ($name === 'env.production') {
     if (!$keepEnv) { file_put_contents("$app/.env", $zip->getFromIndex($i)); $out[] = '.env created from template'; }
@@ -181,20 +188,35 @@ for ($i = 0; $i < $zip->numFiles; $i++) {
   $n++;
 }
 $zip->close();
+// routes are loaded by glob(): a route file removed from the code must not stay active on the server
+$stale = 0;
+if (is_dir("$app/routes") && isset($inZip['routes/web.php'])) {  // never on a zip without routes (broken build)
+  foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator("$app/routes", FilesystemIterator::SKIP_DOTS)) as $f) {
+    $rel = 'routes/' . str_replace('\\', '/', substr($f->getPathname(), strlen("$app/routes/")));
+    if ($f->isFile() && !isset($inZip[$rel]) && @unlink($f->getPathname())) { $out[] = "stale removed: $rel"; $stale++; }
+  }
+}
 foreach (['bootstrap/cache'] as $d) { @mkdir("$app/$d", 0755, true); foreach (glob("$app/$d/*.php") as $f) { if (!in_array(basename($f), ['packages.php','services.php'], true)) @unlink($f); } }
 $out[] = "files written = $n";
 $out[] = 'env kept = ' . ($keepEnv ? 'yes' : 'no');
 $out[] = 'zip deleted = ' . (@unlink($zipPath) ? 'yes' : 'NO');
+$out[] = "stale route files removed = $stale";
 $out[] = 'self deleted = ' . (@unlink(__FILE__) ? 'yes' : 'NO');
 echo implode("\n", $out), "\n";
 """.replace("__TOKEN__", token).replace("__APP_DIR__", APP_DIR)
     (OUT / name).write_text(php, encoding="utf-8", newline="\n")
+    # line 1 = file name, line 2 = token; call it with POST and the header X-Deploy-Token (docs/DEPLOYMENT_GUIDE.md)
     (OUT / "extractor.txt").write_text(f"{name}\n{token}\n", encoding="utf-8")
     print("extractor", name)
 
 
+# draw.io entry pages for cloud storage back-ends (they load Microsoft scripts); CITS only embeds index.html.
+# Not shipped, and removed from the server by the drawio extractor.
+DRAWIO_DROP = ["onedrive3.html", "teams.html"]
+
+
 def build_drawio():
-    """drawio.zip (uploaded next to xd_*.php in the public dir) + one-shot extractor into <public>/drawio."""
+    """drawio.zip (uploaded to the private app folder, like app.zip) + one-shot extractor xd_*.php into <public>/drawio."""
     src = SRC / "public" / "drawio"
     assert (src / "CITS_VERSION.txt").is_file(), "public/drawio missing"
     z = OUT / "drawio.zip"
@@ -203,7 +225,7 @@ def build_drawio():
     n = 0
     with zipfile.ZipFile(z, "w", zipfile.ZIP_DEFLATED) as zf:
         for p in src.rglob("*"):
-            if p.is_file():
+            if p.is_file() and p.relative_to(src).as_posix() not in DRAWIO_DROP:
                 zf.write(p, p.relative_to(src).as_posix())
                 n += 1
     for old in OUT.glob("xd_*.php"):
@@ -213,9 +235,14 @@ def build_drawio():
     php = r"""<?php
 declare(strict_types=1);
 header('Content-Type: text/plain; charset=utf-8');
-if (!hash_equals('__TOKEN__', (string)($_GET['t'] ?? ''))) { http_response_code(404); exit; }
+// POST + header only: a token in the query string would end up in access logs.
+if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST' || !hash_equals('__TOKEN__', (string)($_SERVER['HTTP_X_DEPLOY_TOKEN'] ?? ''))) { http_response_code(404); exit; }
+// one run at a time; whatever happens next (error, timeout, fatal), the script removes itself
+$lock = fopen(__FILE__, 'r');
+if (!$lock || !flock($lock, LOCK_EX | LOCK_NB)) { http_response_code(409); echo "already running\n"; exit; }
+register_shutdown_function(function () { if (is_file(__FILE__)) { @unlink(__FILE__); } });
 @set_time_limit(600);
-$zipPath = __DIR__ . '/drawio.zip';
+$zipPath = dirname(__DIR__, 2) . '/__APP_DIR__/drawio.zip';
 $dest = __DIR__ . '/drawio';
 if (!is_file($zipPath)) { echo "drawio.zip not found\n"; exit; }
 $zip = new ZipArchive();
@@ -231,10 +258,11 @@ for ($i = 0; $i < $zip->numFiles; $i++) {
 }
 $zip->close();
 echo "files written = $n\n";
+foreach (__DROP__ as $f) { if (is_file("$dest/$f") && @unlink("$dest/$f")) echo "removed $f\n"; }
 echo 'version = ' . trim((string) @file_get_contents("$dest/CITS_VERSION.txt")) . "\n";
 echo 'zip deleted = ' . (@unlink($zipPath) ? 'yes' : 'NO') . "\n";
 echo 'self deleted = ' . (@unlink(__FILE__) ? 'yes' : 'NO') . "\n";
-""".replace("__TOKEN__", token)
+""".replace("__TOKEN__", token).replace("__APP_DIR__", APP_DIR).replace("__DROP__", "[" + ", ".join(f"'{f}'" for f in DRAWIO_DROP) + "]")
     (OUT / name).write_text(php, encoding="utf-8", newline="\n")
     (OUT / "extractor_drawio.txt").write_text(f"{name}\n{token}\n", encoding="utf-8")
     print("drawio.zip", n, "files", round(z.stat().st_size / 1048576, 1), "MB; extractor", name)

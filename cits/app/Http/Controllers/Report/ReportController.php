@@ -53,6 +53,7 @@ class ReportController extends Controller
     /** Neutralise spreadsheet formula injection in user-entered text. */
     private function safe(mixed $v): mixed
     {
-        return is_string($v) && $v !== '' && str_contains('=+-@', $v[0]) ? "'".$v : $v;
+        // same leading characters as XlsxExportService::text(): = + - @ and tab / carriage return
+        return is_string($v) && $v !== '' && in_array($v[0], ['=', '+', '-', '@', "\t", "\r"], true) ? "'".$v : $v;
     }
 }

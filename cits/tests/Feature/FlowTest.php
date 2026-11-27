@@ -425,3 +425,22 @@ it('searches titles and diagram text, and hides disabled formats', function () {
     ($this->as)($this->ipm)->get(route('flows.create'))->assertNotFound();
     flwDrawio($this, $this->ipm, flwSvg())->assertStatus(422);
 });
+
+it('accepts the online editor SVG as a file part, also past the 1 MB text-field limit of the host', function () {
+    $svg = flwSvg(array_map(fn ($n) => "節點 $n ".str_repeat("說明", 100), range(1, 1500)));
+    expect(strlen($svg))->toBeGreaterThan(1_100_000);
+    $file = fn (string $s) => UploadedFile::fake()->createWithContent('flow.svg', $s);
+
+    ($this->as)($this->ipm)->post(route('flows.store'), ['format' => 'drawio', 'title' => '大圖', 'source_file' => $file($svg)],
+        ['Accept' => 'application/json'])->assertOk()->assertJson(['ok' => true]);
+    $f = ProjectFlow::latest('id')->first();
+    expect($f->format)->toBe('drawio')->and($f->draft_search_text)->toContain('節點 1500');
+
+    $svg2 = flwSvg(['改過的節點']);
+    ($this->as)($this->ipm)->post(route('flows.update', $f->id), ['_method' => 'PUT', 'title' => '大圖', 'source_file' => $file($svg2)],
+        ['Accept' => 'application/json'])->assertOk();
+    expect($f->fresh()->draft_search_text)->toBe('改過的節點');
+
+    ($this->as)($this->ipm)->post(route('flows.store'), ['format' => 'drawio', 'title' => 'x'], ['Accept' => 'application/json'])
+        ->assertStatus(422);
+});

@@ -249,6 +249,10 @@ class MeetingController extends Controller
             abort(422, $e->getMessage());
         }
 
+        // shown in an <iframe> on the meeting page: own scripts and styles only, no plugins, forms or base rewrites
+        $headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
+            ."font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'";
+
         return response()->view('meetings.document', ['html' => $html, 'title' => $a->original_name], 200, $headers);
     }
 

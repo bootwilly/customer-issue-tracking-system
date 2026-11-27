@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
+    @auth<meta name="cits-user" content="{{ auth()->id() }}">@endauth
     <meta name="app-base" content="{{ url('/') }}">
     <title>@yield('title', '首頁') - 客戶問題追蹤系統</title>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
@@ -62,7 +63,7 @@
                 <a href="{{ route('manual.show') }}" class="text-sm text-slate-600 hover:text-indigo-700">操作手冊</a>
                 <a href="{{ route('account.settings') }}" class="text-sm text-slate-600 hover:text-indigo-700">個人設定</a>
                 <a href="{{ route('password.edit') }}" class="text-sm text-slate-600 hover:text-indigo-700">修改密碼</a>
-                <form method="POST" action="{{ route('logout') }}">
+                <form method="POST" action="{{ route('logout') }}" onsubmit="window.citsDropLocalDrafts && window.citsDropLocalDrafts()">
                     @csrf
                     <button type="submit" class="rounded-md bg-slate-100 px-3 py-1 text-sm text-slate-700 hover:bg-slate-200">登出</button>
                 </form>
@@ -89,6 +90,17 @@
     @yield('content')
 </main>
 @auth
+    <script>
+        // Editor drafts kept in this browser (cits:draft:<user>:<context>) go away when the user signs out.
+        window.citsDropLocalDrafts = function () {
+            try {
+                for (let i = localStorage.length - 1; i >= 0; i--) {
+                    const k = localStorage.key(i);
+                    if (k && k.startsWith('cits:draft:')) localStorage.removeItem(k);
+                }
+            } catch (e) {}
+        };
+    </script>
     @inject('idleAuth', 'App\Services\AuthService')
     @if ($idleAuth->idleMinutes() > 0)
         <div id="idle-warn" hidden class="fixed inset-x-0 bottom-4 z-50 mx-auto w-fit rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-lg">
@@ -117,7 +129,7 @@
                 });
                 setInterval(() => {
                     const idle = Date.now() - Math.max(mine, last()); // other tabs share the session
-                    if (idle >= limit + 5000) { location.href = @js(route('home')); return; }
+                    if (idle >= limit + 5000) { window.citsDropLocalDrafts && window.citsDropLocalDrafts(); location.href = @js(route('home')); return; }
                     warn.hidden = idle < warnAt;
                     if (!warn.hidden) left.textContent = String(Math.max(0, Math.ceil((limit - idle) / 1000)));
                 }, 1000);
