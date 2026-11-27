@@ -10,6 +10,7 @@ use App\Repositories\AttachmentRepository;
 use App\Repositories\DraftRepository;
 use App\Repositories\UploadSessionRepository;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
 
@@ -260,7 +261,7 @@ class AttachmentService
 
     public function canView(User $user, Attachment $a): bool
     {
-        $meetingFile = $a->state === 'bound' && in_array($a->owner_type, ['meeting', 'meeting_internal'], true);
+        $meetingFile = $a->state === 'bound' && in_array($a->owner_type, ['meeting', 'meeting_internal', 'meeting_item'], true);
         if ($user->is_admin && ! $meetingFile) {
             return true;
         }
@@ -275,6 +276,11 @@ class AttachmentService
             return false;
         }
         if (! $user->seesInternal() && $a->owner_type === 'meeting' && ! $this->attachments->meetingOpenToClients((int) $a->owner_id)) {
+            return false;
+        }
+        // item pictures follow the item details: clients only once the meeting's record is open to them
+        if (! $user->seesInternal() && $a->owner_type === 'meeting_item'
+            && ! $this->attachments->meetingOpenToClients((int) $this->attachments->meetingIdForItem((int) $a->owner_id))) {
             return false;
         }
         $projectId = $this->attachments->projectIdForOwner($a->owner_type, (int) $a->owner_id);
@@ -311,6 +317,68 @@ class AttachmentService
     public function discardTemp(int $userId, string $context): void
     {
         $this->deleteTemp($this->attachments->tempByContext($userId, $context));
+    }
+
+    // ---- pictures owned directly by a record (meeting items) ----
+
+    /**
+     * @param  int[]  $ownerIds
+     * @return Collection<int, Collection<int, Attachment>> owner id => pictures, oldest first
+     */
+    public function ownedBy(string $ownerType, array $ownerIds): Collection
+    {
+        return $ownerIds ? $this->attachments->owned($ownerType, $ownerIds)->toBase()->groupBy('owner_id') : collect();
+    }
+
+    public function countOwned(string $ownerType, int $ownerId): int
+    {
+        return $this->attachments->countOwned($ownerType, $ownerId);
+    }
+
+    /** Bind the user's freshly uploaded picture (POST /uploads/image) to an owner. */
+    public function bindImage(User $user, int $attachmentId, string $ownerType, int $ownerId): Attachment
+    {
+        $a = $this->attachments->tempImage($attachmentId, $user->id) ?? throw new BusinessException('找不到剛上傳的圖片，請重新上傳。');
+        $this->attachments->bind($a, $ownerType, $ownerId);
+
+        return $a;
+    }
+
+    /** Swap a bound picture's file for the user's new upload (annotated version); the old file goes if unused. */
+    public function replaceImage(User $user, Attachment $old, int $newId): Attachment
+    {
+        $new = $this->attachments->tempImage($newId, $user->id) ?? throw new BusinessException('找不到剛上傳的圖片，請重新上傳。');
+        $oldPath = $old->disk_path;
+        $this->attachments->takeFile($old, $new);
+        if ($this->attachments->countByPath($oldPath) === 0) {
+            $this->disk()->delete($oldPath);
+        }
+
+        return $old;
+    }
+
+    /** Remove pictures: rows, and files no other row shares. @param iterable<Attachment> $list */
+    public function deleteFiles(iterable $list): void
+    {
+        $this->deleteTemp($list);
+    }
+
+    /** Copy as bound to another owner (排下次會議 carries an item's pictures). */
+    public function copyBound(Attachment $a, string $ownerType, int $ownerId): Attachment
+    {
+        return $this->attachments->duplicate($a, ['state' => 'bound', 'owner_type' => $ownerType, 'owner_id' => $ownerId, 'draft_context_key' => null]);
+    }
+
+    /**
+     * Copy as the user's unsaved upload of an editor context (reused when that context already holds the same file):
+     * the editor binds it on save like a pasted picture, under the new container's view permission.
+     */
+    public function copyAsTemp(User $user, Attachment $a, string $context): Attachment
+    {
+        $have = $this->attachments->tempByContext($user->id, $context)->firstWhere('disk_path', $a->disk_path);
+
+        return $have ?? $this->attachments->duplicate($a, ['state' => 'temp', 'owner_type' => null, 'owner_id' => null,
+            'draft_context_key' => $context, 'uploaded_by' => $user->id]);
     }
 
     /** @param iterable<Attachment> $list */

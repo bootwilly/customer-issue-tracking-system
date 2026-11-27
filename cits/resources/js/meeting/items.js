@@ -1,7 +1,11 @@
 /**
  * Meeting discussion items: every field autosaves (text after a short pause, selects / dates at once).
  * A blank row is created on the server when its topic is first typed; Enter in a topic adds / jumps to the next row.
+ * Pictures: paste / drop into a row or pick files; "標記" opens the self-hosted draw.io with the picture locked as
+ * background (an earlier drawing re-opens editable) and the result replaces the picture in place.
  */
+import { openDrawing, srcToDataUri } from '../editor/drawing';
+
 const DELAY = 800;
 
 const csrf = () => document.querySelector('meta[name="csrf-token"]')?.content ?? '';
@@ -26,9 +30,57 @@ async function send(method, url, body) {
     return data;
 }
 
+/** PNG exported by draw.io as "xmlpng": the diagram sits in a tEXt chunk named mxfile. */
+function isDrawingPng(uri) {
+    if (!uri.startsWith('data:image/png;base64,')) return false;
+    try {
+        return atob(uri.slice(uri.indexOf(',') + 1)).includes('tEXtmxfile');
+    } catch {
+        return false;
+    }
+}
+
+function viewImage(src) {
+    const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 z-50 flex cursor-zoom-out items-center justify-center bg-slate-900/80 p-4';
+    const img = document.createElement('img');
+    img.src = src;
+    img.alt = '附圖';
+    img.className = 'max-h-full max-w-full rounded bg-white';
+    overlay.appendChild(img);
+    const onKey = (e) => e.key === 'Escape' && close();
+    const close = () => {
+        document.removeEventListener('keydown', onKey, true);
+        overlay.remove();
+    };
+    overlay.addEventListener('click', close);
+    document.addEventListener('keydown', onKey, true);
+    document.body.appendChild(overlay);
+}
+
 function init(list) {
     const base = list.dataset.url;
     const template = list.parentElement.querySelector('template[data-item-template]');
+    const imageTemplate = list.parentElement.querySelector('template[data-image-template]');
+    const imagesMax = Number(list.dataset.imagesMax) || 0;
+
+    /** POST /uploads/image: the picture becomes the user's unsaved attachment; returns its id. */
+    async function uploadPicture(file) {
+        const body = new FormData();
+        body.append('file', file, file.name || 'image.png');
+        body.append('context', list.dataset.uploadContext);
+        const res = await fetch(list.dataset.uploadUrl, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrf() },
+            body,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            throw new Error(data.message ?? (data.errors && Object.values(data.errors)[0]?.[0]) ?? `圖片上傳失敗（${res.status}）`);
+        }
+        return data.attachment_id;
+    }
     const addBtn = list.parentElement.querySelector('[data-item-add]');
 
     const rows = () => [...list.querySelectorAll('[data-item]')];
@@ -47,7 +99,13 @@ function init(list) {
         if (link) {
             link.classList.toggle('hidden', !item.issue_url);
             if (item.issue_url) link.href = item.issue_url;
-            link.textContent = item.issue_url ? `開啟 ${item.issue_no}` : '';
+            link.textContent = item.issue_url ? item.issue_label || `開啟 ${item.issue_no}` : '';
+        }
+        row.querySelector('[data-issue-closed]')?.classList.toggle('hidden', !item.issue_closed);
+        const convert = row.querySelector('[data-issue-convert]');
+        if (convert) {
+            convert.href = `${base}/${item.id}/issue`;
+            convert.classList.toggle('hidden', !!item.issue_url);
         }
         const status = row.querySelector('[data-field="status"]');
         status.disabled = false;
@@ -107,6 +165,8 @@ function init(list) {
             }
         });
 
+        bindImages(row, flush);
+
         const topic = row.querySelector('[data-field="topic"]');
         topic.addEventListener('keydown', async (e) => {
             if (e.key !== 'Enter' || e.isComposing) return;
@@ -151,6 +211,105 @@ function init(list) {
                 }
             }),
         );
+    }
+
+    function bindImages(row, flush) {
+        const box = row.querySelector('[data-item-images]');
+        if (!box || !imageTemplate) return;
+        const holder = box.querySelector('[data-image-list]');
+        const count = () => holder.querySelectorAll('[data-image-id]').length;
+
+        function render(images) {
+            holder.replaceChildren(
+                ...images.map((p) => {
+                    const fig = imageTemplate.content.firstElementChild.cloneNode(true);
+                    fig.dataset.imageId = p.id;
+                    fig.querySelector('img').src = p.url;
+                    return fig;
+                }),
+            );
+        }
+
+        async function itemId() {
+            await flush();
+            if (!row.dataset.itemId) throw new Error('請先輸入問題點，再加圖片。');
+            return row.dataset.itemId;
+        }
+
+        async function addFiles(files) {
+            const pics = [...files].filter((f) => f.type.startsWith('image/'));
+            if (!pics.length) return;
+            try {
+                const id = await itemId();
+                if (imagesMax && count() + pics.length > imagesMax) throw new Error(`每個討論事項最多 ${imagesMax} 張圖片。`);
+                for (const [n, file] of pics.entries()) {
+                    setState(row, pics.length > 1 ? `圖片上傳中 ${n + 1}/${pics.length}…` : '圖片上傳中…');
+                    const attachment = await uploadPicture(file);
+                    render((await send('POST', `${base}/${id}/images`, { attachment_id: attachment })).images);
+                }
+                setState(row, '已儲存');
+            } catch (err) {
+                setState(row, err.message, true);
+            }
+        }
+
+        async function annotate(fig) {
+            const src = fig.querySelector('img').src;
+            try {
+                const id = await itemId();
+                setState(row, '開啟繪圖…');
+                const uri = await srcToDataUri(src);
+                const blob = isDrawingPng(uri) ? await openDrawing({ png: uri }) : await openDrawing({ images: [src] });
+                if (!blob) {
+                    setState(row, '');
+                    return;
+                }
+                setState(row, '繪圖上傳中…');
+                const attachment = await uploadPicture(new File([blob], 'drawing.png', { type: 'image/png' }));
+                render((await send('PUT', `${base}/${id}/images/${fig.dataset.imageId}`, { attachment_id: attachment })).images);
+                setState(row, '已儲存');
+            } catch (err) {
+                setState(row, err.message, true);
+            }
+        }
+
+        async function remove(fig) {
+            if (!confirm('移除這張圖片？')) return;
+            try {
+                const id = await itemId();
+                render((await send('DELETE', `${base}/${id}/images/${fig.dataset.imageId}`)).images);
+                setState(row, '已儲存');
+            } catch (err) {
+                setState(row, err.message, true);
+            }
+        }
+
+        box.querySelector('[data-image-input]')?.addEventListener('change', (e) => {
+            addFiles(e.target.files);
+            e.target.value = '';
+        });
+        holder.addEventListener('click', (e) => {
+            const fig = e.target.closest('[data-image-id]');
+            if (!fig) return;
+            if (e.target.closest('[data-image-view]')) viewImage(fig.querySelector('img').src);
+            else if (e.target.closest('[data-image-draw]')) annotate(fig);
+            else if (e.target.closest('[data-image-remove]')) remove(fig);
+        });
+        // screenshots pasted into any field of the row, or dropped anywhere on it
+        row.addEventListener('paste', (e) => {
+            const files = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'));
+            if (!files.length) return;
+            e.preventDefault();
+            addFiles(files);
+        });
+        row.addEventListener('dragover', (e) => {
+            if ([...(e.dataTransfer?.types ?? [])].includes('Files')) e.preventDefault();
+        });
+        row.addEventListener('drop', (e) => {
+            if (!e.dataTransfer?.files?.length) return;
+            e.preventDefault();
+            addFiles(e.dataTransfer.files);
+        });
     }
 
     function addRow() {

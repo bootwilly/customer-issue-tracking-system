@@ -163,7 +163,7 @@ class PmQueryService
             'mesPages' => $this->repo->mesPages($projectId),
             'statusMeta' => $this->wf->status('issue', $i->status),
             'linked' => $i->tickets->isNotEmpty(),
-            'meetingItems' => $this->meetings->itemsForIssue($u, $projectId, $i->id),
+            'meetingThreads' => $this->meetings->issueThreads($u, $projectId, $i->id),
             'meetingTargets' => $this->meetings->schedulableFor($u, $projectId),
             'watching' => $this->watch->watchingIssue($u, $i->id),
             'watchers' => $this->watch->issueWatchers($i),

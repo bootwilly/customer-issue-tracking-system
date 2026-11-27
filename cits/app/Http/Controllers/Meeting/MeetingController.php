@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Meeting;
 
 use App\Exceptions\BusinessException;
 use App\Http\Controllers\Controller;
+use App\Models\Attachment;
 use App\Models\Meeting;
 use App\Models\MeetingItem;
 use App\Services\AttachmentService;
@@ -12,10 +13,13 @@ use App\Services\Export\XlsxExportService;
 use App\Services\Flow\FlowRenderer;
 use App\Services\Meeting\MeetingDocuments;
 use App\Services\Meeting\MeetingService;
+use App\Services\Pm\PmQueryService;
+use App\Services\WorkflowService;
 use App\Support\CurrentProject;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class MeetingController extends Controller
 {
@@ -156,6 +160,7 @@ class MeetingController extends Controller
         $comments = $this->svc->comments($u, $m);
         $this->svc->markRead($u, $m);
         $canEdit = $this->svc->canEdit($u, $m);
+        $items = $this->svc->items($u, $m);
 
         return view('meetings.show', [
             'm' => $m,
@@ -163,12 +168,18 @@ class MeetingController extends Controller
             'isClient' => ! $u->seesInternal(),
             'documents' => $this->documents->visible($u, $m),
             'attendees' => $this->svc->attendees($m),
-            'items' => $this->svc->items($u, $m),
+            'items' => $items,
+            'history' => $history = $this->svc->itemHistory($u, $m, $items),
+            'images' => $this->svc->itemImages($u, $m, $items),
+            'historyImages' => $this->svc->historyImages($u, $history),
+            'imageContext' => $this->svc->imageContext($m->id),
+            'imagesMax' => $this->svc->imagesMax(),
             'comments' => $comments,
             'contentVisible' => $this->svc->contentVisible($u, $m),
             'canEdit' => $canEdit,
             'canShare' => $this->svc->canToggleShare($u, $m),
             'canPickIssues' => $this->svc->canPickIssues($u, $m),
+            'canConvert' => $this->svc->canConvert($u, $m),
             'issueStages' => $this->svc->issueStages(),
             'canComment' => $this->svc->canComment($u, $m),
             'canExport' => $this->exporter->canExport($u, $pid),
@@ -340,7 +351,7 @@ class MeetingController extends Controller
         $pid = $this->viewer($r);
         $d = $r->validate(['start_at' => ['required', 'string', 'max:30']], [], ['start_at' => '下次會議時間']);
         try {
-            $m = $this->svc->scheduleNext($r->user(), $pid, $id, $d['start_at']);
+            $m = $this->svc->scheduleNext($r->user(), $pid, $id, $d['start_at'], $r->boolean('skip_closed'));
         } catch (BusinessException $e) {
             return $this->back($id, $e->getMessage(), false);
         }
@@ -401,6 +412,8 @@ class MeetingController extends Controller
             'id' => $i->id, 'topic' => $i->topic, 'discussion' => $i->discussion, 'conclusion' => $i->conclusion,
             'owner_id' => $i->owner_id, 'due_date' => $i->due_date?->format('Y-m-d'), 'status' => $i->status,
             'issue_no' => $issue?->issue_no, 'issue_url' => $issue ? route('issues.show', $issue->id) : null,
+            'issue_label' => $issue ? $issue->title.'（'.$this->svc->issueStatusLabel($issue->status).'）' : null,
+            'issue_closed' => $issue ? $this->svc->issueClosed($i) : false,
         ];
     }
 
@@ -446,6 +459,86 @@ class MeetingController extends Controller
         $d = $r->validate(['dir' => ['required', 'in:up,down']]);
 
         return $this->itemResult($r, $id, fn () => $this->svc->moveItem($r->user(), $pid, $id, $item, $d['dir'] === 'up' ? -1 : 1), '已調整順序。');
+    }
+
+    // ---- item -> new internal issue ----
+
+    public function issueForm(Request $r, int $id, int $item, PmQueryService $q)
+    {
+        $pid = $this->viewer($r);
+        try {
+            $draft = $this->svc->issueDraft($r->user(), $pid, $id, $item);
+        } catch (BusinessException $e) {
+            return $this->back($id, $e->getMessage(), false);
+        }
+
+        return view('meetings.issue-create', $draft + $q->createFormData($pid));
+    }
+
+    public function issueStore(Request $r, int $id, int $item, WorkflowService $wf)
+    {
+        $pid = $this->viewer($r);
+        $d = $r->validate([
+            'origin' => ['required', 'string', 'max:30'],
+            'title' => 'required|string|max:200',
+            'process_type' => ['nullable', 'string', Rule::in($wf->lookups('process_type')->pluck('code')->all())],
+            'mes_page_id' => 'nullable|integer|exists:mes_pages,id',
+            'severity' => 'required|integer|between:1,5',
+            'content_html' => 'required|string',
+        ]);
+        try {
+            $issue = $this->svc->convertItem($r->user(), $pid, $id, $item, $d);
+        } catch (BusinessException $e) {
+            return back()->with('err', $e->getMessage())->withInput();
+        }
+
+        return redirect()->route('issues.show', $issue->id)->with('ok', "已建立內部單 {$issue->issue_no}，並連結到會議的討論事項。");
+    }
+
+    // ---- item pictures (JSON; the file itself comes from POST /uploads/image) ----
+
+    /** @param iterable<Attachment> $list */
+    public static function imageJson(iterable $list): array
+    {
+        $out = [];
+        foreach ($list as $a) {
+            // ?v= changes when an annotated version takes the same id (the file is cached for an hour)
+            $out[] = ['id' => $a->id, 'url' => route('attachments.show', ['id' => $a->id, 'v' => substr((string) $a->sha256, 0, 12)])];
+        }
+
+        return $out;
+    }
+
+    private function imageResult(callable $fn): JsonResponse
+    {
+        try {
+            return response()->json(['ok' => true, 'images' => self::imageJson($fn())]);
+        } catch (BusinessException $e) {
+            return response()->json(['ok' => false, 'error' => $e->getMessage()], 422);
+        }
+    }
+
+    public function storeItemImage(Request $r, int $id, int $item)
+    {
+        $pid = $this->viewer($r);
+        $d = $r->validate(['attachment_id' => ['required', 'integer']]);
+
+        return $this->imageResult(fn () => $this->svc->addItemImage($r->user(), $pid, $id, $item, (int) $d['attachment_id']));
+    }
+
+    public function updateItemImage(Request $r, int $id, int $item, int $image)
+    {
+        $pid = $this->viewer($r);
+        $d = $r->validate(['attachment_id' => ['required', 'integer']]);
+
+        return $this->imageResult(fn () => $this->svc->replaceItemImage($r->user(), $pid, $id, $item, $image, (int) $d['attachment_id']));
+    }
+
+    public function destroyItemImage(Request $r, int $id, int $item, int $image)
+    {
+        $pid = $this->viewer($r);
+
+        return $this->imageResult(fn () => $this->svc->removeItemImage($r->user(), $pid, $id, $item, $image));
     }
 
     /** Picker: issues of the project (JSON). ?q= keyword, ?open=1 non-terminal only, ?stage= workflow stage. */

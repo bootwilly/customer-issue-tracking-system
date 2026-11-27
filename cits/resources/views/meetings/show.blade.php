@@ -84,6 +84,7 @@
                 </div>
                 @if ($canEdit)
                     <div data-items data-url="{{ route('meetings.items.store', $m->id) }}"
+                         data-upload-url="{{ route('uploads.image') }}" data-upload-context="{{ $imageContext }}" data-images-max="{{ $imagesMax }}"
                          @if ($canPickIssues) data-issues-url="{{ route('meetings.issues.search', $m->id) }}" data-issues-add-url="{{ route('meetings.items.issues', $m->id) }}" data-issue-stages='@json(array_values($issueStages))' @endif
                          class="space-y-2">
                         @foreach ($items as $i)
@@ -91,6 +92,7 @@
                         @endforeach
                     </div>
                     <template data-item-template>@include('meetings._item', ['i' => null])</template>
+                    <template data-image-template>@include('meetings._item-image', ['p' => ['id' => 0, 'url' => '']])</template>
                     <div class="mt-2 flex flex-wrap gap-2">
                         <button type="button" data-item-add class="rounded-md px-3 py-1.5 text-sm text-indigo-700 ring-1 ring-indigo-200 hover:bg-indigo-50">＋ 新增討論事項</button>
                         @if ($canPickIssues)
@@ -194,6 +196,11 @@
                         @csrf
                         <input type="datetime-local" name="start_at" value="{{ old('start_at', $nextDefault) }}" required class="{{ $box }}">
                         <p class="text-xs text-slate-500">帶入主題、地點、與會者，以及還在追蹤中的討論事項。</p>
+                        @unless ($isClient)
+                            <label class="flex items-center gap-1 text-xs text-slate-600">
+                                <input type="checkbox" name="skip_closed" value="1" checked class="rounded border-slate-300"> 略過內部單已結案的事項
+                            </label>
+                        @endunless
                         <button type="submit" class="{{ $btn }} bg-indigo-600 font-medium text-white hover:bg-indigo-700">建立下次會議</button>
                     </form>
                 </section>

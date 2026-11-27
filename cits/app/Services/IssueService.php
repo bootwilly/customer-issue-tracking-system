@@ -112,6 +112,8 @@ class IssueService
         return match ($type) {
             'dependency_added', 'dependency_removed' => trim(($p['issue'] ?? '').' '.(isset($p['kind']) ? $this->wf->lookupLabel('dependency_kind', $p['kind']) : '')),
             'tags_changed' => implode('、', array_map(fn ($c) => $this->wf->lookupLabel('issue_tag', $c), $p['to'] ?? [])) ?: '（無）',
+            'meeting_discussed' => '「'.($p['meeting'] ?? '').'」'.(($p['conclusion'] ?? '') !== '' ? '：'.$p['conclusion'] : ''),
+            'from_meeting' => '「'.($p['meeting'] ?? '').'」第 '.($p['item'] ?? '?').' 項',
             default => null,
         };
     }

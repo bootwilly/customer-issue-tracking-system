@@ -29,6 +29,11 @@ Route::middleware(['web', 'auth', 'active', 'project'])->prefix('meetings')->nam
     Route::put('/{id}/items/{item}', [MeetingController::class, 'updateItem'])->whereNumber(['id', 'item'])->name('items.update');
     Route::delete('/{id}/items/{item}', [MeetingController::class, 'destroyItem'])->whereNumber(['id', 'item'])->name('items.destroy');
     Route::post('/{id}/items/{item}/move', [MeetingController::class, 'moveItem'])->whereNumber(['id', 'item'])->name('items.move');
+    Route::get('/{id}/items/{item}/issue', [MeetingController::class, 'issueForm'])->whereNumber(['id', 'item'])->name('items.issue');
+    Route::post('/{id}/items/{item}/issue', [MeetingController::class, 'issueStore'])->whereNumber(['id', 'item'])->name('items.issue.store');
+    Route::post('/{id}/items/{item}/images', [MeetingController::class, 'storeItemImage'])->whereNumber(['id', 'item'])->name('items.images.store');
+    Route::put('/{id}/items/{item}/images/{image}', [MeetingController::class, 'updateItemImage'])->whereNumber(['id', 'item', 'image'])->name('items.images.update');
+    Route::delete('/{id}/items/{item}/images/{image}', [MeetingController::class, 'destroyItemImage'])->whereNumber(['id', 'item', 'image'])->name('items.images.destroy');
     Route::post('/{id}/comments', [MeetingController::class, 'storeComment'])->whereNumber('id')->name('comments.store');
     Route::put('/{id}/comments/{comment}', [MeetingController::class, 'updateComment'])->whereNumber(['id', 'comment'])->name('comments.update');
     Route::delete('/{id}/comments/{comment}', [MeetingController::class, 'destroyComment'])->whereNumber(['id', 'comment'])->name('comments.destroy');

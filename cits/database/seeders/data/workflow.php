@@ -176,6 +176,8 @@ return [
         ['event_label', 'meeting_deleted', '刪除會議（回收筒）', 280],
         ['event_label', 'meeting_restored', '還原會議', 290],
         ['event_label', 'meeting_purged', '永久刪除會議', 300],
+        ['event_label', 'meeting_discussed', '會議結論', 310],
+        ['event_label', 'from_meeting', '由會議事項建立', 320],
         // collaboration features: needinfo / watch / tags / dependencies (ticket + issue timelines, project events)
         ['event_label', 'needinfo_requested', '要求客戶補充資料', 400],
         ['event_label', 'needinfo_answered', '客戶已補充資料', 410],

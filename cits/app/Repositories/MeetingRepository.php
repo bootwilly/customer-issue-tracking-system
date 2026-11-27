@@ -159,7 +159,7 @@ class MeetingRepository
 
     public function item(int $meetingId, int $itemId): ?MeetingItem
     {
-        return MeetingItem::with(['owner:id,name', 'issue:id,issue_no,title,status'])->where(['meeting_id' => $meetingId, 'id' => $itemId])->first();
+        return MeetingItem::with(['owner:id,name,user_type,is_admin', 'issue:id,issue_no,title,status'])->where(['meeting_id' => $meetingId, 'id' => $itemId])->first();
     }
 
     public function maxItemSort(int $meetingId): int
@@ -191,10 +191,44 @@ class MeetingRepository
      */
     public function itemsForIssue(int $projectId, int $issueId): Collection
     {
+        return $this->itemsForIssues($projectId, [$issueId])->sortByDesc(fn ($i) => $i->meeting?->start_at)->values();
+    }
+
+    /**
+     * Items linked to any of the issues, in live meetings of the project (oldest meeting first).
+     *
+     * @param  int[]  $issueIds
+     * @return Collection<int, MeetingItem>
+     */
+    public function itemsForIssues(int $projectId, array $issueIds): Collection
+    {
+        if (! $issueIds) {
+            return collect();
+        }
+
         return MeetingItem::with(['meeting:id,title,start_at,status', 'owner:id,name'])
-            ->where('issue_id', $issueId)
+            ->whereIn('issue_id', $issueIds)
             ->whereIn('meeting_id', Meeting::select('id')->where('project_id', $projectId)->whereNull('deleted_at'))
-            ->get()->sortByDesc(fn ($i) => $i->meeting?->start_at)->values();
+            ->get()->sortBy(fn ($i) => [$i->meeting?->start_at?->getTimestamp() ?? 0, $i->id])->values();
+    }
+
+    /** Another item of the meeting already linked to the issue. */
+    public function itemWithIssue(int $meetingId, int $issueId, ?int $exceptId): ?MeetingItem
+    {
+        return MeetingItem::where(['meeting_id' => $meetingId, 'issue_id' => $issueId])
+            ->when($exceptId, fn ($q, $id) => $q->whereKeyNot($id))->first(['id', 'topic', 'sort']);
+    }
+
+    /** Row lock on one item (caller runs inside UnitOfWork). */
+    public function lockItem(int $meetingId, int $itemId): ?MeetingItem
+    {
+        return MeetingItem::where(['meeting_id' => $meetingId, 'id' => $itemId])->lockForUpdate()->first();
+    }
+
+    /** @return int[] ids of the meeting's items */
+    public function itemIds(int $meetingId): array
+    {
+        return MeetingItem::where('meeting_id', $meetingId)->pluck('id')->map(fn ($v) => (int) $v)->all();
     }
 
     /**

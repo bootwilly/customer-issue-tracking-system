@@ -10,5 +10,6 @@ return [
         'issue_comment' => 'issue.view',
         'meeting' => 'meeting.view',
         'meeting_internal' => 'meeting.view',
+        'meeting_item' => 'meeting.view',
     ],
 ];

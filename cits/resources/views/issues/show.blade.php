@@ -316,13 +316,27 @@
 
             <section class="{{ $card }}">
                 <h2 class="mb-2 text-base font-semibold">會議紀錄</h2>
-                @forelse ($meetingItems as $mi)
-                    <div class="mb-2 rounded border border-slate-100 p-2 text-sm">
-                        <a href="{{ route('meetings.show', $mi->meeting_id) }}#item-{{ $mi->id }}" class="font-medium text-indigo-700 hover:underline">{{ tw($mi->meeting?->start_at, 'Y-m-d') }} {{ $mi->meeting?->title }}</a>
-                        <x-badge scope="meeting_item" :status="$mi->status" class="ml-1" />
-                        @if ($mi->conclusion)<div class="mt-1 whitespace-pre-line text-slate-700">{{ $mi->conclusion }}</div>@endif
-                        @if ($mi->owner || $mi->due_date)<div class="mt-1 text-xs text-slate-500">{{ $mi->owner?->name }} {{ $mi->due_date?->format('Y-m-d') }}</div>@endif
-                    </div>
+                @forelse ($meetingThreads as $th)
+                    @php $last = $th['latest']; $n = $th['items']->count(); @endphp
+                    <details class="mb-2 rounded border border-slate-100 p-2 text-sm" @if ($loop->first) open @endif>
+                        <summary class="cursor-pointer">
+                            <a href="{{ route('meetings.show', $last->meeting_id) }}#item-{{ $last->id }}" class="font-medium text-indigo-700 hover:underline">{{ $last->meeting?->title }}</a>
+                            <span class="text-xs text-slate-500">{{ $n > 1 ? $n.' 場：'.tw($th['items']->first()->meeting?->start_at, 'm/d').' → '.tw($last->meeting?->start_at, 'm/d') : tw($last->meeting?->start_at, 'Y-m-d') }}</span>
+                            <x-badge scope="meeting_item" :status="$last->status" class="ml-1" />
+                            @if ($th['conclusion'])<div class="mt-1 whitespace-pre-line text-slate-700">{{ $th['conclusion'] }}</div>@endif
+                        </summary>
+                        <ol class="mt-2 space-y-2 border-l border-slate-200 pl-3">
+                            @foreach ($th['items'] as $mi)
+                                <li>
+                                    <a href="{{ route('meetings.show', $mi->meeting_id) }}#item-{{ $mi->id }}" class="text-xs font-medium text-indigo-700 hover:underline">{{ tw($mi->meeting?->start_at, 'Y-m-d') }} {{ $mi->meeting?->title }}</a>
+                                    <x-badge scope="meeting_item" :status="$mi->status" class="ml-1" />
+                                    @if ($mi->discussion)<div class="mt-1 whitespace-pre-line text-xs text-slate-600">{{ $mi->discussion }}</div>@endif
+                                    @if ($mi->conclusion)<div class="mt-1 whitespace-pre-line text-slate-800">{{ $mi->conclusion }}</div>@endif
+                                    @if ($mi->owner || $mi->due_date)<div class="mt-1 text-xs text-slate-500">{{ $mi->owner?->name }} {{ $mi->due_date?->format('Y-m-d') }}</div>@endif
+                                </li>
+                            @endforeach
+                        </ol>
+                    </details>
                 @empty
                     <p class="text-sm text-slate-400">還沒有在會議中討論過。</p>
                 @endforelse

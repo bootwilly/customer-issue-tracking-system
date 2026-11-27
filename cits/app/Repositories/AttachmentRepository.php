@@ -7,6 +7,7 @@ use App\Models\ClientTicket;
 use App\Models\Issue;
 use App\Models\IssueComment;
 use App\Models\Meeting;
+use App\Models\MeetingItem;
 use App\Models\Project;
 use App\Models\SystemSetting;
 use App\Models\TicketComment;
@@ -63,6 +64,8 @@ class AttachmentRepository
             'issue_comment' => ($i = IssueComment::query()->whereKey($ownerId)->value('issue_id'))
                 ? Issue::query()->whereKey($i)->value('project_id') : null,
             'meeting', 'meeting_internal' => Meeting::query()->whereKey($ownerId)->whereNull('deleted_at')->value('project_id'),
+            'meeting_item' => ($m = $this->meetingIdForItem($ownerId))
+                ? Meeting::query()->whereKey($m)->whereNull('deleted_at')->value('project_id') : null,
             default => null,
         };
 
@@ -76,6 +79,55 @@ class AttachmentRepository
             ->where(fn ($q) => $q->whereNotNull('published_at')
                 ->orWhereIn('created_by', User::query()->select('id')->where('user_type', 'client')))
             ->exists();
+    }
+
+    public function meetingIdForItem(int $itemId): ?int
+    {
+        $id = MeetingItem::query()->whereKey($itemId)->value('meeting_id');
+
+        return $id === null ? null : (int) $id;
+    }
+
+    /**
+     * Bound attachments of owners of one type, oldest first.
+     *
+     * @param  int[]  $ownerIds
+     * @return Collection<int, Attachment>
+     */
+    public function owned(string $ownerType, array $ownerIds): Collection
+    {
+        return Attachment::query()->where('state', 'bound')->where('owner_type', $ownerType)
+            ->whereIntegerInRaw('owner_id', $ownerIds ?: [0])->orderBy('id')->get();
+    }
+
+    public function countOwned(string $ownerType, int $ownerId): int
+    {
+        return Attachment::query()->where('state', 'bound')->where('owner_type', $ownerType)->where('owner_id', $ownerId)->count();
+    }
+
+    /** The user's own unsaved picture (temp, image mime). */
+    public function tempImage(int $id, int $userId): ?Attachment
+    {
+        return Attachment::query()->whereKey($id)->where('state', 'temp')->where('uploaded_by', $userId)
+            ->where('mime', 'like', 'image/%')->first();
+    }
+
+    public function bind(Attachment $a, string $ownerType, int $ownerId): void
+    {
+        $a->fill(['state' => 'bound', 'owner_type' => $ownerType, 'owner_id' => $ownerId])->save();
+    }
+
+    /** Point $old at $new's file (same id, same place in its owner's list); $new's row goes. */
+    public function takeFile(Attachment $old, Attachment $new): void
+    {
+        $old->fill($new->only(['disk_path', 'original_name', 'mime', 'size', 'sha256', 'uploaded_by']))->save();
+        $new->delete();
+    }
+
+    /** New row for the same stored file (files are shared by sha256, so nothing is copied on disk). */
+    public function duplicate(Attachment $a, array $data): Attachment
+    {
+        return Attachment::query()->create($data + $a->only(['disk_path', 'original_name', 'mime', 'size', 'sha256', 'uploaded_by']));
     }
 
     public function projectIsActive(int $projectId): bool

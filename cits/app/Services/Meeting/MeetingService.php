@@ -3,6 +3,8 @@
 namespace App\Services\Meeting;
 
 use App\Exceptions\BusinessException;
+use App\Models\Attachment;
+use App\Models\Issue;
 use App\Models\Meeting;
 use App\Models\MeetingComment;
 use App\Models\MeetingItem;
@@ -11,7 +13,10 @@ use App\Repositories\EventRepository;
 use App\Repositories\MeetingRepository;
 use App\Repositories\ProjectRepository;
 use App\Repositories\UnitOfWork;
+use App\Services\AttachmentService;
+use App\Services\Collab\WatchService;
 use App\Services\ContentService;
+use App\Services\IssueService;
 use App\Services\WorkflowService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -38,6 +43,9 @@ class MeetingService
 
     private const EXTERNAL_MAX = 30;
 
+    /** attachments.owner_type of discussion item pictures */
+    private const IMAGE_OWNER = 'meeting_item';
+
     public function __construct(
         private MeetingRepository $repo,
         private EventRepository $events,
@@ -45,6 +53,9 @@ class MeetingService
         private ContentService $content,
         private WorkflowService $wf,
         private UnitOfWork $uow,
+        private WatchService $watch,
+        private AttachmentService $files,
+        private IssueService $issues,
     ) {}
 
     // ---- permissions ----
@@ -423,6 +434,72 @@ class MeetingService
         return ! $u->seesInternal() || ! $this->canView($u, $pid) ? collect() : $this->repo->itemsForIssue($pid, $issueId);
     }
 
+    /**
+     * Issue page "會議紀錄": the issue's items grouped into discussion threads. A thread follows carried_from_id
+     * (排下次會議 copies an open item); an item carried from one not linked to this issue starts its own thread.
+     * Threads newest activity first, items inside oldest first.
+     *
+     * @return Collection<int, array{items: Collection<int, MeetingItem>, latest: MeetingItem, conclusion: ?string}>
+     */
+    public function issueThreads(User $u, int $pid, int $issueId): Collection
+    {
+        if (! $u->seesInternal() || ! $this->canView($u, $pid)) {
+            return collect();
+        }
+        $items = $this->repo->itemsForIssues($pid, [$issueId]);
+        $byId = $items->keyBy('id');
+        $root = function (MeetingItem $i) use ($byId): int {
+            $seen = [];
+            while ($i->carried_from_id && $byId->has($i->carried_from_id) && ! isset($seen[$i->id])) {
+                $seen[$i->id] = true;
+                $i = $byId->get($i->carried_from_id);
+            }
+
+            return $i->id;
+        };
+
+        return $items->groupBy($root)->map(fn (Collection $g) => [
+            'items' => $g->values(),
+            'latest' => $g->last(),
+            'conclusion' => $g->reverse()->first(fn ($i) => (string) $i->conclusion !== '')?->conclusion,
+        ])->sortByDesc(fn ($t) => $t['latest']->meeting?->start_at?->getTimestamp() ?? 0)->values();
+    }
+
+    /**
+     * Meeting page "歷次討論": for each item linked to an issue, the issue's items in OTHER meetings (oldest first).
+     * Internal users only: clients never see issue links nor other meetings through them.
+     *
+     * @param  Collection<int, MeetingItem>  $items
+     * @return array<int, Collection<int, MeetingItem>> item id => other items
+     */
+    public function itemHistory(User $u, Meeting $m, Collection $items): array
+    {
+        $issueIds = $items->pluck('issue_id')->filter()->unique()->values()->all();
+        if (! $u->seesInternal() || ! $issueIds) {
+            return [];
+        }
+        $all = $this->repo->itemsForIssues($m->project_id, $issueIds)->groupBy('issue_id');
+        $out = [];
+        foreach ($items as $i) {
+            if ($i->issue_id) {
+                $out[$i->id] = $all->get($i->issue_id, collect())->reject(fn ($x) => $x->meeting_id === $m->id)->values();
+            }
+        }
+
+        return $out;
+    }
+
+    public function issueStatusLabel(string $status): string
+    {
+        return $this->wf->label('issue', $status);
+    }
+
+    /** Whether the item's linked issue reached a terminal status (closed / won't fix...). */
+    public function issueClosed(?MeetingItem $i): bool
+    {
+        return $i?->issue !== null && $this->wf->status('issue', $i->issue->status)->is_terminal;
+    }
+
     // ---- validation helpers ----
 
     private function cleanText(?string $s, int $max, string $label, bool $required = false): ?string
@@ -549,7 +626,7 @@ class MeetingService
                 $this->repo->createItem(['meeting_id' => $m->id, 'sort' => $sort += 10, 'topic' => $topic, 'status' => $itemStatus,
                     'created_by' => $u->id, 'updated_by' => $u->id]);
             }
-            $this->markPublished($m, $status);
+            $this->markPublished($m, $status, $u);
             $this->events->log($pid, 'meeting', $m->id, 'meeting_created', null, $status, $u->id, ['title' => $m->title]);
 
             return $m;
@@ -598,7 +675,7 @@ class MeetingService
 
         return $this->uow->run(function () use ($u, $pid, $m, $from, $to) {
             $this->repo->save($m, ['status' => $to, 'updated_by' => $u->id]);
-            $this->markPublished($m, $to);
+            $this->markPublished($m, $to, $u);
             $this->events->log($pid, 'meeting', $m->id, 'meeting_status', $from, $to, $u->id, ['title' => $m->title]);
 
             return $m;
@@ -606,10 +683,34 @@ class MeetingService
     }
 
     /** First time a published status is reached the record becomes visible to clients of a shared meeting. */
-    private function markPublished(Meeting $m, string $status): void
+    private function markPublished(Meeting $m, string $status, User $u): void
     {
         if ($m->published_at === null && $this->wf->status(self::SCOPE, $status)->is_released) {
             $this->repo->save($m, ['published_at' => now()]);
+            $this->announceConclusions($m, $u);
+        }
+    }
+
+    /**
+     * Once per meeting (first publish): every linked issue with a conclusion gets a timeline entry and its watchers
+     * a notification. Later edits of the conclusion are not announced again.
+     */
+    private function announceConclusions(Meeting $m, User $u): void
+    {
+        $items = $this->repo->items($m->id)->filter(fn (MeetingItem $i) => $i->issue_id && trim((string) $i->conclusion) !== '');
+        if ($items->isEmpty()) {
+            return;
+        }
+        $issues = $this->repo->issuesByIds($m->project_id, $items->pluck('issue_id')->unique()->values()->all())->keyBy('id');
+        foreach ($items as $i) {
+            $issue = $issues->get($i->issue_id);
+            if (! $issue) {
+                continue;
+            }
+            $this->events->log($m->project_id, 'issue', $issue->id, 'meeting_discussed', null, null, $u->id, [
+                'meeting' => $m->title, 'meeting_id' => $m->id, 'item_id' => $i->id, 'conclusion' => mb_substr((string) $i->conclusion, 0, 200),
+            ]);
+            $this->watch->notifyIssue($issue, "{$issue->issue_no} 在會議「{$m->title}」有結論", $u->id, []);
         }
     }
 
@@ -659,7 +760,7 @@ class MeetingService
      * Schedule the follow-up meeting: same type / title / place / attendees, open items carried over.
      * The new meeting belongs to the user (a client's follow-up is client-created, hence shared).
      */
-    public function scheduleNext(User $u, int $pid, int $id, ?string $startAt): Meeting
+    public function scheduleNext(User $u, int $pid, int $id, ?string $startAt, bool $skipClosed = false): Meeting
     {
         $this->wf->authorize($u, 'meeting.create', $pid);
         $prev = $this->find($u, $pid, $id);
@@ -669,7 +770,7 @@ class MeetingService
         $open = $this->openItemStatuses();
         $full = $this->contentVisible($u, $prev);
 
-        return $this->uow->run(function () use ($u, $pid, $prev, $start, $end, $visible, $open, $full) {
+        return $this->uow->run(function () use ($u, $pid, $prev, $start, $end, $visible, $open, $full, $skipClosed) {
             $status = $this->wf->initial('meeting_initial', 'scheduled');
             $m = $this->repo->create([
                 'project_id' => $pid, 'type' => $prev->type, 'title' => $prev->title, 'start_at' => $start, 'end_at' => $end,
@@ -681,12 +782,19 @@ class MeetingService
                 $att->pluck('external_name')->filter()->values()->all());
             $itemStatus = $this->wf->initial('meeting_item_initial', 'default');
             $k = 0;
-            foreach ($this->repo->items($prev->id)->filter(fn ($i) => in_array($i->status, $open, true)) as $i) {
-                $this->repo->createItem([
+            // $skipClosed: items whose internal issue is already closed stay behind (internal users only see issue links)
+            $carry = $this->repo->items($prev->id)->filter(fn ($i) => in_array($i->status, $open, true)
+                && ! ($skipClosed && $u->seesInternal() && $this->issueClosed($i)));
+            $images = $full ? $this->files->ownedBy(self::IMAGE_OWNER, $carry->pluck('id')->all()) : collect();
+            foreach ($carry as $i) {
+                $new = $this->repo->createItem([
                     'meeting_id' => $m->id, 'sort' => (++$k) * 10, 'topic' => $i->topic, 'issue_id' => $i->issue_id,
                     'owner_id' => $full ? $i->owner_id : null, 'due_date' => $full ? $i->due_date : null,
                     'status' => $itemStatus, 'carried_from_id' => $i->id, 'created_by' => $u->id, 'updated_by' => $u->id,
                 ]);
+                foreach ($images->get($i->id, collect()) as $a) {
+                    $this->files->copyBound($a, self::IMAGE_OWNER, $new->id);
+                }
             }
             $this->events->log($pid, 'meeting', $m->id, 'meeting_created', null, $status, $u->id, ['title' => $m->title, 'prev_meeting_id' => $prev->id]);
 
@@ -747,6 +855,10 @@ class MeetingService
             $no = trim((string) $in['issue_no']);
             $d['issue_id'] = $no === '' ? null
                 : ($this->repo->issueByNo($m->project_id, $no)?->id ?? throw new BusinessException("找不到問題單「{$no}」。"));
+            // one item per issue per meeting (other meetings may discuss it again)
+            if ($d['issue_id'] && $d['issue_id'] !== $item?->issue_id && ($dup = $this->repo->itemWithIssue($m->id, $d['issue_id'], $item?->id))) {
+                throw new BusinessException("問題單「{$no}」已在本會議的「{$dup->topic}」事項中。");
+            }
         }
 
         return $d;
@@ -788,7 +900,9 @@ class MeetingService
         $m = $this->editableMeeting($u, $pid, $id);
         $i = $this->findItem($m, $itemId);
         $this->uow->run(function () use ($u, $m, $i) {
+            $images = $this->files->ownedBy(self::IMAGE_OWNER, [$i->id])->get($i->id, collect());
             $this->repo->deleteItem($i);
+            $this->files->deleteFiles($images);
             $this->itemChanged($u, $m, $i->topic, true);
         });
     }
@@ -825,6 +939,203 @@ class MeetingService
         if ($m->published_at !== null && ! $this->events->recentExists('meeting', $m->id, 'meeting_items', $u->id, now()->subMinutes(10))) {
             $this->events->log($m->project_id, 'meeting', $m->id, 'meeting_items', null, null, $u->id, ['title' => $m->title, 'topic' => $topic, 'deleted' => $deleted]);
         }
+    }
+
+    // ---- item pictures ----
+
+    public function imagesMax(): int
+    {
+        return max(1, (int) config('meeting.item_images_max', 10));
+    }
+
+    /** Upload context of item pictures (POST /uploads/image). */
+    public function imageContext(int $meetingId): string
+    {
+        return 'meeting:item:'.$meetingId;
+    }
+
+    /**
+     * Pictures per item as the user may see them: like discussion / conclusion, held back until the record is open.
+     *
+     * @param  Collection<int, MeetingItem>  $items  items of $m
+     * @return Collection<int, Collection> item id => attachments
+     */
+    public function itemImages(User $u, Meeting $m, Collection $items): Collection
+    {
+        return $this->contentVisible($u, $m) ? $this->files->ownedBy(self::IMAGE_OWNER, $items->pluck('id')->all()) : collect();
+    }
+
+    /** Pictures of items of other meetings ("歷次討論", internal users only). @param array<int, Collection> $history */
+    public function historyImages(User $u, array $history): Collection
+    {
+        $ids = collect($history)->flatten(1)->pluck('id')->unique()->values()->all();
+
+        return $u->seesInternal() ? $this->files->ownedBy(self::IMAGE_OWNER, $ids) : collect();
+    }
+
+    /** @return Collection<int, Attachment> the item's pictures after the change */
+    public function addItemImage(User $u, int $pid, int $id, int $itemId, int $attachmentId): Collection
+    {
+        $m = $this->editableMeeting($u, $pid, $id);
+
+        return $this->uow->run(function () use ($u, $m, $itemId, $attachmentId) {
+            $i = $this->repo->lockItem($m->id, $itemId) ?? throw new BusinessException('找不到這個討論事項。');
+            if ($this->files->countOwned(self::IMAGE_OWNER, $i->id) >= $this->imagesMax()) {
+                throw new BusinessException('每個討論事項最多 '.$this->imagesMax().' 張圖片。');
+            }
+            $this->files->bindImage($u, $attachmentId, self::IMAGE_OWNER, $i->id);
+            $this->itemChanged($u, $m, $i->topic);
+
+            return $this->files->ownedBy(self::IMAGE_OWNER, [$i->id])->get($i->id, collect());
+        });
+    }
+
+    /** Annotated version replaces the picture in place (same position). */
+    public function replaceItemImage(User $u, int $pid, int $id, int $itemId, int $imageId, int $attachmentId): Collection
+    {
+        $m = $this->editableMeeting($u, $pid, $id);
+
+        return $this->uow->run(function () use ($u, $m, $itemId, $imageId, $attachmentId) {
+            [$i, $old] = $this->ownedImage($m, $itemId, $imageId);
+            $this->files->replaceImage($u, $old, $attachmentId);
+            $this->itemChanged($u, $m, $i->topic);
+
+            return $this->files->ownedBy(self::IMAGE_OWNER, [$i->id])->get($i->id, collect());
+        });
+    }
+
+    public function removeItemImage(User $u, int $pid, int $id, int $itemId, int $imageId): Collection
+    {
+        $m = $this->editableMeeting($u, $pid, $id);
+
+        return $this->uow->run(function () use ($u, $m, $itemId, $imageId) {
+            [$i, $old] = $this->ownedImage($m, $itemId, $imageId);
+            $this->files->deleteFiles([$old]);
+            $this->itemChanged($u, $m, $i->topic);
+
+            return $this->files->ownedBy(self::IMAGE_OWNER, [$i->id])->get($i->id, collect());
+        });
+    }
+
+    /** @return array{0: MeetingItem, 1: Attachment} */
+    private function ownedImage(Meeting $m, int $itemId, int $imageId): array
+    {
+        $i = $this->repo->lockItem($m->id, $itemId) ?? throw new BusinessException('找不到這個討論事項。');
+        $a = $this->files->ownedBy(self::IMAGE_OWNER, [$i->id])->get($i->id, collect())->firstWhere('id', $imageId)
+            ?? throw new BusinessException('找不到這張圖片。');
+
+        return [$i, $a];
+    }
+
+    // ---- item -> new internal issue ----
+
+    /**
+     * Origins the user may create an internal issue as (lookup issue_create_perm: origin code => permission).
+     *
+     * @return array<string,string> origin code => label
+     */
+    public function issueOrigins(User $u, int $pid): array
+    {
+        if (! $u->seesInternal() || ! $this->wf->can($u, 'issue.create', $pid)) {
+            return [];
+        }
+        $out = [];
+        foreach ($this->wf->lookupMap('issue_create_perm') as $origin => $perm) {
+            if ($this->wf->can($u, $perm, $pid)) {
+                $out[$origin] = $this->wf->lookupLabel('issue_origin', $origin);
+            }
+        }
+
+        return $out;
+    }
+
+    /** "轉內部單" on items of this meeting: internal editors who may create some kind of internal issue. */
+    public function canConvert(User $u, Meeting $m): bool
+    {
+        return $u->seesInternal() && $this->canEdit($u, $m) && $this->issueOrigins($u, $m->project_id) !== [];
+    }
+
+    /** Editor draft / upload context of the new issue's content. */
+    public function issueDraftContext(int $itemId): string
+    {
+        return 'issue:meeting-item:'.$itemId;
+    }
+
+    /** @return array{0: Meeting, 1: MeetingItem} */
+    private function convertible(User $u, int $pid, int $id, int $itemId): array
+    {
+        $m = $this->editableMeeting($u, $pid, $id);
+        if (! $this->canConvert($u, $m)) {
+            throw new BusinessException('沒有權限建立內部單。');
+        }
+        $i = $this->findItem($m, $itemId);
+        if ($i->issue_id) {
+            throw new BusinessException('這個討論事項已經連結內部單 '.($i->issue?->issue_no ?? '').'。');
+        }
+
+        return [$m, $i];
+    }
+
+    /**
+     * Prefilled form: title = topic, content = source line + discussion + conclusion + the item's pictures
+     * (copied as the user's unsaved uploads of the draft context, so the issue owns its own copies).
+     *
+     * @return array{meeting: Meeting, item: MeetingItem, no: int, title: string, content_html: string, context: string, origins: array<string,string>}
+     */
+    public function issueDraft(User $u, int $pid, int $id, int $itemId): array
+    {
+        [$m, $i] = $this->convertible($u, $pid, $id, $itemId);
+        $context = $this->issueDraftContext($i->id);
+        $no = $this->itemNo($m, $i);
+        $text = fn (string $label, ?string $v) => trim((string) $v) === '' ? ''
+            : '<p><strong>'.e($label).'</strong><br>'.nl2br(e(trim((string) $v)), false).'</p>';
+        $date = CarbonImmutable::instance($m->start_at)->setTimezone(self::TZ)->format('Y-m-d');
+        $html = '<p>來源：<a href="'.e(route('meetings.show', $m->id).'#item-'.$i->id).'">會議「'.e($m->title).'」（'.$date.'）第 '.$no.' 項</a></p>'
+            .$text('討論內容', $i->discussion).$text('結論', $i->conclusion);
+        foreach ($this->files->ownedBy(self::IMAGE_OWNER, [$i->id])->get($i->id, collect()) as $a) {
+            $copy = $this->files->copyAsTemp($u, $a, $context);
+            $html .= '<p><img src="'.e(route('attachments.show', $copy->id)).'" alt="附圖"></p>';
+        }
+
+        return ['meeting' => $m, 'item' => $i, 'no' => $no, 'title' => mb_substr($i->topic, 0, 200), 'content_html' => $html,
+            'context' => $context, 'origins' => $this->issueOrigins($u, $pid)];
+    }
+
+    /** Position of the item on its meeting (1-based, as shown). */
+    private function itemNo(Meeting $m, MeetingItem $i): int
+    {
+        return (int) $this->repo->items($m->id)->search(fn ($x) => $x->id === $i->id) + 1;
+    }
+
+    /**
+     * Create the internal issue (IssueService::createInternal does the permission checks of the origin) and link the
+     * item to it in the same transaction; the item lock keeps a double submit from creating two issues.
+     */
+    public function convertItem(User $u, int $pid, int $id, int $itemId, array $in): Issue
+    {
+        [$m, $i] = $this->convertible($u, $pid, $id, $itemId);
+        $origin = (string) ($in['origin'] ?? '');
+        if (! array_key_exists($origin, $this->issueOrigins($u, $pid))) {
+            throw new BusinessException('請選擇內部單來源。');
+        }
+        $no = $this->itemNo($m, $i);
+
+        return $this->uow->run(function () use ($u, $pid, $m, $i, $in, $origin, $no) {
+            $locked = $this->repo->lockItem($m->id, $i->id) ?? throw new BusinessException('找不到這個討論事項。');
+            if ($locked->issue_id) {
+                throw new BusinessException('這個討論事項已經連結內部單。');
+            }
+            $issue = $this->issues->createInternal($u, $pid, $origin, $in, $this->issueDraftContext($i->id));
+            $this->repo->saveItem($locked, ['issue_id' => $issue->id, 'updated_by' => $u->id]);
+            if ($i->owner?->seesInternal()) {
+                $this->watch->autoWatchIssue($issue, [$i->owner_id]); // the item's owner follows the new issue
+            }
+            $this->events->log($pid, 'issue', $issue->id, 'from_meeting', null, null, $u->id,
+                ['meeting' => $m->title, 'meeting_id' => $m->id, 'item_id' => $i->id, 'item' => $no]);
+            $this->itemChanged($u, $m, $i->topic);
+
+            return $issue;
+        });
     }
 
     // ---- issues from 問題管理 ----
@@ -1079,7 +1390,9 @@ class MeetingService
         }
         $this->uow->run(function () use ($u, $pid, $m) {
             $this->events->log($pid, 'meeting', $m->id, 'meeting_purged', null, null, $u->id, ['title' => $m->title, 'start_at' => (string) $m->start_at]);
+            $images = $this->files->ownedBy(self::IMAGE_OWNER, $this->repo->itemIds($m->id))->flatten(1);
             $this->repo->purge($m);
+            $this->files->deleteFiles($images);
         });
     }
 }

@@ -37,6 +37,15 @@ scheduled / recording → 取消 cancelled（terminal，不能編輯）；cancel
 
 討論事項狀態 scope meeting_item：追蹤中 open → 已完成 done（terminal）。未完成（非 terminal）的事項在「安排下次會議」時帶過去。
 
+### 跨會議、附圖、轉內部單（2026-11-27）
+
+- 一張內部單可出現在多場會議（meeting_items.issue_id 多對一）；同一場會議同一張單只能一個事項（itemFields 檢查）。
+- 內部單頁「會議紀錄」依 carried_from_id 分組成討論串（MeetingService::issueThreads）；會議頁每個事項的「歷次討論」= 同單在其他會議的事項（itemHistory，僅內部）。
+- 第一次發布（markPublished）時，連單且有結論的事項寫 issue 事件 meeting_discussed 並 notifyIssue；之後修改不再通知。
+- 安排下次會議可勾 skip_closed：連結內部單已 terminal 的事項不帶過去。
+- 事項附圖：attachments.owner_type = meeting_item（不改表）。上傳走 POST /uploads/image（context meeting:item:{meetingId}），再 POST /meetings/{id}/items/{item}/images 綁定；PUT 換成標記後的版本（同 id、同位置，舊檔無人引用即刪）；DELETE 移除。上限 config meeting.item_images_max（預設 10）。客戶權限同討論內容（AttachmentService::canView → meetingOpenToClients）。排下次會議複製附件列（同 disk_path）。
+- 轉內部單：GET/POST /meetings/{id}/items/{item}/issue。來源選項 = lookup issue_create_perm 中使用者有權限者；IssueService::createInternal 建單，同交易鎖事項、寫 issue_id、事件 from_meeting、負責人（內部）自動關注。事項附圖以暫存附件複製到草稿 context issue:meeting-item:{itemId}，建單時隨內容綁到 issue。
+
 ## 4. 資料表
 
 - meetings：project_id, type, title, start_at, end_at, location, status, customer_visible, notes_html, internal_html, notes_rev, published_at, prev_meeting_id, created_by, updated_by, deleted_at, deleted_by
@@ -52,7 +61,7 @@ scheduled / recording → 取消 cancelled（terminal，不能編輯）；cancel
 - 頂列「流程圖」後面「會議」。
 - 列表：未完成（時間正序）／已完成／取消／我的待辦，搜尋標題與內容。未讀留言數。
 - 會議頁：基本資料、與會者、討論事項表（邊打邊存、Enter 新增一列、↑↓ 排序）、補充紀錄（rich text）、內部備註、留言區、安排下次會議、加入行事曆（.ics）。
-- 問題單頁：「會議紀錄」區塊（哪些會議討論過、結論）＋「排入會議」。
+- 問題單頁：「會議紀錄」區塊（依討論串分組：哪些會議討論過、每場討論與結論）＋「排入會議」。
 - 專案管理 → 回收筒：會議還原 / 永久刪除（需輸入標題）。
 
 ## 6. 第一版不做
