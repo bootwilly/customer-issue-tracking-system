@@ -161,3 +161,9 @@ Status: P1 deployed to production (https://<domain>/mescits/). P2 features in pr
 ## Public repo placeholders (2026-11-26)
 - Tracked files use placeholders: example.com (site/mail domain), cpuser (cPanel user), cpuser_mescits (DB name/user), C:\Users\<you> (local paths).
 - Real values: deploy/private.local.md and deploy/deploy.local.json (both git-ignored; build.py reads the json or CITS_* env vars). Never commit real domain/user/paths again.
+
+## Excel import of PM issues (2026-11-27)
+- Only the standard template is accepted (version cell template_version in the hidden lists sheet; bump IssueImportService::TEMPLATE_VERSION when columns change). Template is generated at download time from lookups + active MES pages.
+- Drawing positions: use cell anchors (from/to, oneCell ext, absolute pos), never top-level a:xfrm (often stale). Group children: map chOff/chExt onto the group anchor box.
+- Shapes are composed into PNG in the browser (canvas), not on the server (no GD/font dependency). Picture uploads use per-row contexts so bindFromHtml of one issue never deletes another row's temp pictures.
+- Re-import key = project + source code + row number (no column) (issue_import_rows). Never fake created_at for imported rows; the original date stays in the content.

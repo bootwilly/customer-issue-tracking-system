@@ -106,7 +106,10 @@
         <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
             <h2 class="text-base font-semibold">內部問題清單</h2>
             @if ($can['create'])
-                <a href="{{ route('pm.issues.create') }}" class="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">新增內部問題</a>
+                <div class="flex gap-2">
+                    <a href="{{ route('pm.issues.import') }}" class="rounded-md border border-indigo-600 px-3 py-1.5 text-sm font-medium text-indigo-700 hover:bg-indigo-50" title="用標準範本的 Excel 一次建立多張內部單">Excel 匯入</a>
+                    <a href="{{ route('pm.issues.create') }}" class="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">新增內部問題</a>
+                </div>
             @endif
         </div>
         <form method="GET" action="{{ route('pm.index') }}" class="mb-3 grid grid-cols-2 gap-2 md:flex md:flex-wrap md:items-center">

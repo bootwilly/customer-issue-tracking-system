@@ -313,6 +313,19 @@ class AttachmentService
         $this->deleteTemp($this->attachments->tempByContext($userId, $context)->filter(fn ($a) => ! in_array($a->id, $ids, true)));
     }
 
+    /** The user's own unsaved upload in an editor context (Excel import reads the uploaded workbook through this). */
+    public function importFile(User $user, int $id, string $context): ?Attachment
+    {
+        return $this->attachments->tempByContext($user->id, $context)->firstWhere('id', $id);
+    }
+
+    /** @return int[] ids of the user's unsaved pictures in a context */
+    public function tempImageIds(User $user, string $context): array
+    {
+        return $this->attachments->tempByContext($user->id, $context)
+            ->filter(fn (Attachment $a) => str_starts_with((string) $a->mime, 'image/'))->pluck('id')->map(fn ($id) => (int) $id)->all();
+    }
+
     /** 刪除某使用者某 context 所有仍為暫存的附件 */
     public function discardTemp(int $userId, string $context): void
     {

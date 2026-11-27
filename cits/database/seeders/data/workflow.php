@@ -145,6 +145,7 @@ return [
         ['lookup_editable', 'process_type', '處理類型', 10],
         ['lookup_editable', 'meeting_type', '會議類型', 20],
         ['lookup_editable', 'issue_tag', '內部單標籤', 30],
+        ['lookup_editable', 'issue_import_status', '匯入檔狀態', 40],
         // meetings: type (editable in 選項管理), initial status per start mode, initial item status
         ['meeting_type', 'regular', '定期會議', 10],
         ['meeting_type', 'review', '問題檢討', 20],
@@ -193,6 +194,46 @@ return [
         ['dependency_free_origin', 'test', 'test', 10],
         // ticket statuses left out of the duplicate (similar) search
         ['similar_exclude_ticket', 'cancelled', 'cancelled', 10],
+        // Excel import of PM internal issues (standard template): sheet names (code = role, name = sheet name)
+        ['issue_import_sheet', 'list', '問題清單', 10],
+        ['issue_import_sheet', 'help', '說明', 20],
+        ['issue_import_sheet', 'lists', '清單', 30],
+        // template columns: code = field (no/func/title/content/status... are read by the importer; any other column
+        // goes into the "會議紀錄" section), name = header text, sort = column order of the downloaded template
+        ['issue_import_column', 'no', '序號', 10],
+        ['issue_import_column', 'date', '日期', 20],
+        ['issue_import_column', 'process_type', '處理類型', 30],
+        ['issue_import_column', 'func', '功能名稱', 40],
+        ['issue_import_column', 'mes_page', 'MES頁面', 50],
+        ['issue_import_column', 'title', '標題', 60],
+        ['issue_import_column', 'content', '問題內容', 70],
+        ['issue_import_column', 'detail', '明細表', 80],
+        ['issue_import_column', 'status', '狀態', 90],
+        ['issue_import_column', 'severity', '嚴重度', 100],
+        ['issue_import_column', 'asker', '提問人', 110],
+        ['issue_import_column', 'pm', 'PM', 120],
+        ['issue_import_column', 'dev', '開發', 130],
+        ['issue_import_column', 'test', '測試', 140],
+        ['issue_import_column', 'close', '結案說明', 150],
+        ['issue_import_column', 'package', '更新包編號', 160],
+        ['issue_import_column', 'note', '備註', 170],
+        // columns that must exist in the header row (name = code)
+        ['issue_import_required', 'no', 'no', 10],
+        ['issue_import_required', 'func', 'func', 20],
+        ['issue_import_required', 'title', 'title', 30],
+        ['issue_import_required', 'content', 'content', 40],
+        ['issue_import_required', 'status', 'status', 50],
+        // tracking status values allowed in the 狀態 column (meeting vocabulary, not the issue workflow)
+        ['issue_import_status', 'discussing', '待討論', 10],
+        ['issue_import_status', 'spec', '規格確認', 20],
+        ['issue_import_status', 'confirm', '待確認', 30],
+        ['issue_import_status', 'added', '新增', 40],
+        ['issue_import_status', 'closed', '結案', 50],
+        ['issue_import_status', 'wont_fix', '不處理', 60],
+        // rows with these status codes are not imported (every other row becomes a new PM issue)
+        ['issue_import_skip', 'closed', 'closed', 10],
+        ['issue_import_skip', 'wont_fix', 'wont_fix', 20],
+        ['event_label', 'imported', '由 Excel 匯入', 460],
         // events written before flow v2
         ['event_label', 'flow_updated', '更新流程圖（舊版）', 120],
         ['event_label', 'flow_enabled', '啟用流程圖（舊版）', 130],
@@ -402,5 +443,9 @@ return [
         ['watch.max_recipients', '50'],
         ['saved_query.max_per_list', '20'],
         ['attachment.allowed_ext', 'png,jpg,jpeg,gif,webp,mp4,webm,mov,pdf,doc,docx,xls,xlsx,csv,ppt,pptx,txt,log,json,md,zip,rar,7z'],
+        ['issue_import.default_severity', '3'],
+        ['issue_import.max_rows', '300'],
+        ['issue_import.max_images', '500'],
+        ['issue_import.max_unzip_mb', '200'],
     ],
 ];

@@ -3,6 +3,7 @@
 use App\Http\Controllers\Issue\IssueController;
 use App\Http\Controllers\Pm\PmController;
 use App\Http\Controllers\Pm\PmIssueCreateController;
+use App\Http\Controllers\Pm\PmIssueImportController;
 use App\Http\Controllers\Pm\PmTicketController;
 use Illuminate\Support\Facades\Route;
 
@@ -19,6 +20,12 @@ Route::middleware(['web', 'auth', 'active', 'project'])->group(function () {
     Route::post('/pm/tickets/{id}/issue', [PmTicketController::class, 'createIssue'])->whereNumber('id')->name('pm.tickets.issue');
     Route::post('/pm/tickets/{id}/link', [PmTicketController::class, 'link'])->whereNumber('id')->name('pm.tickets.link');
     Route::post('/pm/tickets/{id}/quote', [PmTicketController::class, 'quote'])->whereNumber('id')->name('pm.tickets.quote');
+
+    Route::get('/pm/issues/import', [PmIssueImportController::class, 'index'])->name('pm.issues.import');
+    Route::get('/pm/issues/import/template', [PmIssueImportController::class, 'template'])->name('pm.issues.import.template');
+    Route::post('/pm/issues/import/preview', [PmIssueImportController::class, 'preview'])->name('pm.issues.import.preview');
+    Route::get('/pm/issues/import/{file}/media', [PmIssueImportController::class, 'media'])->whereNumber('file')->name('pm.issues.import.media');
+    Route::post('/pm/issues/import/apply', [PmIssueImportController::class, 'apply'])->name('pm.issues.import.apply');
 
     Route::get('/pm/issues/create', [PmIssueCreateController::class, 'create'])->name('pm.issues.create');
     Route::post('/pm/issues', [PmIssueCreateController::class, 'store'])->name('pm.issues.store');
