@@ -5,7 +5,7 @@ use App\Http\Controllers\Upload\DraftController;
 use App\Http\Controllers\Upload\UploadController;
 use Illuminate\Support\Facades\Route;
 
-Route::middleware(['web', 'auth'])->group(function () {
+Route::middleware(['web', 'auth', 'active'])->group(function () {
     Route::post('/uploads/image', [UploadController::class, 'image'])->name('uploads.image');
     Route::post('/uploads/init', [UploadController::class, 'init'])->name('uploads.init');
     Route::post('/uploads/{id}/chunk', [UploadController::class, 'chunk'])->name('uploads.chunk');

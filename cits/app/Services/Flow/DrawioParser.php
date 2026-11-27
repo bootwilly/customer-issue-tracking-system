@@ -20,6 +20,16 @@ class DrawioParser
         '/<!\s*(DOCTYPE|ENTITY)/i' => '不可包含 DOCTYPE／ENTITY 宣告',
     ];
 
+    /**
+     * Second pass on the parsed tree: the regexes above see raw text and can be dodged with namespace prefixes,
+     * a '>' inside an earlier attribute value or character references. Compared by local name, values decoded.
+     */
+    private const ACTIVE_ELEMENTS = ['script', 'iframe', 'object', 'embed', 'meta', 'link', 'base', 'form', 'handler', 'listener',
+        'set', 'animate', 'animatemotion', 'animatetransform', 'animatecolor', 'discard'];
+
+    /** Attributes holding a URL, in any namespace (href, xlink:href ...), plus SMIL value attributes. */
+    private const URL_ATTRIBUTES = ['href', 'src', 'action', 'formaction', 'from', 'to', 'values', 'by'];
+
     /** @return array{svg:string, labels:string[], pages:int} */
     public function parse(string $raw, int $maxBytes): array
     {
@@ -41,13 +51,14 @@ class DrawioParser
         if (! $doc || $doc->documentElement->localName !== 'svg') {
             throw new BusinessException('不是有效的 SVG 檔。');
         }
+        $this->assertInert($doc);
         $content = $doc->documentElement->getAttribute('content');
         $file = $content !== '' ? $this->load($content) : null;
         if (! $file) {
             throw new BusinessException('SVG 裡沒有 draw.io 原始資料，無法再編輯（請用 draw.io 匯出「可編輯的 SVG」）。');
         }
 
-        $models = $this->models($file);
+        $models = $this->models($file, $maxBytes);
         if (count($models) === 0) {
             throw new BusinessException('draw.io 資料裡沒有圖。');
         }
@@ -97,7 +108,36 @@ class DrawioParser
         libxml_clear_errors();
         libxml_use_internal_errors($prev);
 
-        return $ok && $doc->documentElement ? $doc : null;
+        return $ok && $doc->documentElement && $doc->doctype === null ? $doc : null;
+    }
+
+    private function assertInert(DOMDocument $doc): void
+    {
+        foreach ((new DOMXPath($doc))->query('//*') as $el) {
+            if (in_array(strtolower($el->localName), self::ACTIVE_ELEMENTS, true)) {
+                throw new BusinessException('流程圖內容不安全：不可包含程式碼、動畫或嵌入元素。');
+            }
+            foreach ($el->attributes as $attr) {
+                $name = strtolower($attr->localName);
+                if (str_starts_with($name, 'on')) {
+                    throw new BusinessException('流程圖內容不安全：不可包含事件屬性（on…）。');
+                }
+                if (in_array($name, self::URL_ATTRIBUTES, true) && ! $this->safeUrl($attr->value)) {
+                    throw new BusinessException('流程圖內容不安全：不可包含 javascript: 連結或非圖片的 data: 網址。');
+                }
+            }
+        }
+    }
+
+    /** The value is already entity-decoded; browsers ignore whitespace / control characters inside a scheme. */
+    private function safeUrl(string $value): bool
+    {
+        $v = strtolower((string) preg_replace('/[\x00-\x20]+/', '', $value));
+        if (preg_match('/^(javascript|vbscript):/', $v)) {
+            return false;
+        }
+
+        return ! str_starts_with($v, 'data:') || str_starts_with($v, 'data:image/');
     }
 
     /**
@@ -106,7 +146,7 @@ class DrawioParser
      *
      * @return DOMDocument[]
      */
-    private function models(DOMDocument $file): array
+    private function models(DOMDocument $file, int $maxBytes): array
     {
         $root = $file->documentElement;
         if ($root->localName === 'mxGraphModel') {
@@ -132,7 +172,8 @@ class DrawioParser
             }
             $text = trim($d->textContent);
             $bin = $text === '' ? false : base64_decode($text, true);
-            $xml = $bin === false ? false : @gzinflate($bin);
+            // cap the inflated size: a few MB of deflate data can expand to gigabytes
+            $xml = $bin === false ? false : @gzinflate($bin, $maxBytes);
             $m = $xml === false ? null : $this->load(rawurldecode($xml));
             if (! $m || $m->documentElement->localName !== 'mxGraphModel') {
                 throw new BusinessException('draw.io 資料損毀，無法解析。');

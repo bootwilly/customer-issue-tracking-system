@@ -95,9 +95,15 @@ class SpanStyleAttributeSanitizer implements AttributeSanitizerInterface
     }
 }
 
-/** img src 僅允許 /attachments/{id} 或同源 */
+/**
+ * img src: only an attachment of this site (/attachments/{id}, relative or absolute on the app host, any sub-path
+ * prefix such as /mescits). Other same-site paths are refused: an <img> pointing at a page with a GET side effect
+ * (edit locks, exports) or at a file the author cannot open would make every viewer request it with their cookies.
+ */
 class ImgSrcAttributeSanitizer implements AttributeSanitizerInterface
 {
+    private const PATH = '#^(/[A-Za-z0-9_-]+)*/attachments/\d+$#';
+
     public function __construct(private string $host) {}
 
     public function getSupportedElements(): ?array
@@ -112,14 +118,15 @@ class ImgSrcAttributeSanitizer implements AttributeSanitizerInterface
 
     public function sanitizeAttribute(string $element, string $attribute, string $value, HtmlSanitizerConfig $config): ?string
     {
-        if (preg_match('#^/attachments/\d+$#', $value)) {
+        $parts = parse_url(trim($value));
+        if (! $parts || isset($parts['query']) || isset($parts['fragment']) || isset($parts['user']) || ! preg_match(self::PATH, $parts['path'] ?? '')) {
+            return null;
+        }
+        if (! isset($parts['host']) && ! isset($parts['scheme'])) {
             return $value;
         }
-        $parts = parse_url($value);
-        if ($parts && isset($parts['host']) && $this->host !== '' && strcasecmp($parts['host'], $this->host) === 0) {
-            return $value;
-        }
+        $sameHost = $this->host !== '' && isset($parts['host']) && strcasecmp($parts['host'], $this->host) === 0;
 
-        return null;
+        return $sameHost && in_array(strtolower($parts['scheme'] ?? ''), ['http', 'https'], true) ? $value : null;
     }
 }

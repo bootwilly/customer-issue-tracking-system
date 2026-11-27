@@ -53,8 +53,14 @@ class PasswordResetService
             return true;
         }
 
+        $broker = Password::broker();
+        // createToken() skips the broker's own per-user cooldown (sendResetLink checks it), so check it here
+        if ($broker->getRepository()->recentlyCreatedToken($user)) {
+            return true;
+        }
+
         try {
-            $token = Password::broker()->createToken($user);
+            $token = $broker->createToken($user);
             $link = route('password.reset', ['token' => $token, 'email' => $user->email]);
             $this->outbox->applySmtpConfig();
             Mail::mailer('smtp')->html(

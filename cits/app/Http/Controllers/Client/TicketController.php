@@ -158,6 +158,9 @@ class TicketController extends Controller
     public function edit(Request $r, int $id): View|RedirectResponse
     {
         $this->requireCan($r, 'ticket.edit');
+        // opening the page takes the edit lock: only for a real page load, not an embedded <img>/<script>/fetch
+        $dest = $r->headers->get('Sec-Fetch-Dest');
+        abort_if($dest !== null && ! in_array($dest, ['document', 'iframe'], true), 403);
         try {
             $t = $this->tickets->startEdit($r->user(), $id, $this->pid());
         } catch (BusinessException $e) {

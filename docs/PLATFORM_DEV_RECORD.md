@@ -139,7 +139,7 @@ Email 只在以下條件都成立時才寄：郵件設定已啟用、使用者�
 ## 7. 開發環境（本機，Windows）
 
 - PHP：`/c/Users/<you>/AppData/Local/Microsoft/WinGet/Packages/PHP.PHP.NTS.8.5_Microsoft.Winget.Source_8wekyb3d8bbwe/php.exe`
-- 測試：在 `cits` 目錄執行 `php vendor/bin/pest`，目前 230 個全過。
+- 測試：在 `cits` 目錄執行 `php vendor/bin/pest`，目前 250 個全過。
   - 和時間有關的程式要用 `now()`（Carbon），不要用 `time()`，否則測試的 `travel()` 沒有作用。
   - `SeedDataLengthTest` 會把所有 migration 以 MariaDB DDL 的 pretend 模式編譯，並檢查 `workflow.php` 的種子值有沒有超過欄位長度。
   - 因此資料 migration 必須用 `DB::statement` 寫原生 SQL。用 query builder 寫的 update 在 pretend 模式下會嘗試連線而失敗。
@@ -221,6 +221,7 @@ Email 只在以下條件都成立時才寄：郵件設定已啟用、使用者�
 | 閒置自動登出 | 60 分鐘沒有操作就登出；剩 2 分鐘時跳出提示和「繼續使用」；多分頁共用計時；停用「記住我」 |
 | 登入紀錄 | 9 種登入事件加來源 IP 寫入 `auth_logs`；系統管理頁可篩選、匯出；保留 180 天。升級 SQL `upgrade-20261126-1633.sql` 已執行並確認 |
 | 安全強化 | 主機代理會採用連線端送的 X-Forwarded-For，所以 IP 可以被偽造：登入和忘記密碼的次數限制改成也依帳號計算。附件類型改成 Office、PDF、文字、JSON、Markdown、zip／rar／7z、圖片、影片。`@richtext` 在顯示時再過濾一次 HTML；`SecurityHeaders` middleware；附件加上 CSP sandbox。升級 SQL `upgrade-20261126-1700.sql` 已執行並確認 |
+| 資安稽核修補 | 依 `docs/security-audit-20261127.md` 修 H-01～H-06、M-01～M-04、M-08、L-01（細節見 `.histories/security-audit-fixes-*.md`）；不用升級 SQL |
 
 ---
 

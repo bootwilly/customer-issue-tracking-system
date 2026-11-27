@@ -388,12 +388,15 @@ class MeetingController extends Controller
         ];
     }
 
-    private function itemJson(MeetingItem $i): array
+    private function itemJson(Request $r, MeetingItem $i): array
     {
+        // internal issue numbers never reach clients (the page hides them the same way, MeetingService::items)
+        $issue = $r->user()->seesInternal() ? $i->issue : null;
+
         return [
             'id' => $i->id, 'topic' => $i->topic, 'discussion' => $i->discussion, 'conclusion' => $i->conclusion,
             'owner_id' => $i->owner_id, 'due_date' => $i->due_date?->format('Y-m-d'), 'status' => $i->status,
-            'issue_no' => $i->issue?->issue_no, 'issue_url' => $i->issue ? route('issues.show', $i->issue->id) : null,
+            'issue_no' => $issue?->issue_no, 'issue_url' => $issue ? route('issues.show', $issue->id) : null,
         ];
     }
 
@@ -406,7 +409,7 @@ class MeetingController extends Controller
         }
 
         return $r->expectsJson()
-            ? response()->json(['ok' => true, 'item' => $item instanceof MeetingItem ? $this->itemJson($item) : null])
+            ? response()->json(['ok' => true, 'item' => $item instanceof MeetingItem ? $this->itemJson($r, $item) : null])
             : redirect()->to(route('meetings.show', $id).'#items')->with('ok', $msg);
     }
 

@@ -93,7 +93,7 @@ class MeetingExportService
             'creator' => fn (array $r) => $r['meeting']->creator?->name,
             'published_at' => fn (array $r) => $r['meeting']->published_at,
             'item_count' => fn (array $r) => $r['items']->count(),
-            'open_items' => fn (array $r) => $r['items']->filter(fn (MeetingItem $i) => ! ($itemStatuses->get($i->status)?->is_terminal))->count(),
+            'open_items' => fn (array $r) => ! $r['content'] ? null : $r['items']->filter(fn (MeetingItem $i) => ! ($itemStatuses->get($i->status)?->is_terminal))->count(),
             'updated_at' => fn (array $r) => $r['meeting']->updated_at,
         ];
         if ($internal) {
@@ -116,7 +116,7 @@ class MeetingExportService
             $meta = array_filter([
                 $i->owner?->name ? '負責人：'.$i->owner->name : null,
                 $i->due_date ? '期限：'.$i->due_date->format('Y-m-d') : null,
-                '狀態：'.$this->wf->label('meeting_item', $i->status),
+                $r['content'] ? '狀態：'.$this->wf->label('meeting_item', $i->status) : null,
             ]);
             $items[] = ($n + 1).'. '.$i->topic.'（'.implode('／', $meta).'）';
             if ($internal && $i->issue) {
@@ -178,7 +178,7 @@ class MeetingExportService
             'conclusion' => fn (array $x) => $x['i']->conclusion,
             'owner' => fn (array $x) => $x['i']->owner?->name,
             'due_date' => fn (array $x) => $x['i']->due_date?->format('Y-m-d'),
-            'status' => fn (array $x) => $this->wf->label('meeting_item', $x['i']->status),
+            'status' => fn (array $x) => $x['c'] ? $this->wf->label('meeting_item', $x['i']->status) : null,
         ];
         if ($internal) {
             $resolvers['issue'] = fn (array $x) => $x['i']->issue ? new ExportLink($x['i']->issue->issue_no, url('/issues/'.$x['i']->issue->id)) : null;
@@ -187,7 +187,7 @@ class MeetingExportService
         $data = [];
         foreach ($rows as $r) {
             foreach ($r['items']->values() as $n => $i) {
-                $data[] = $this->pick($cols, $resolvers, ['m' => $r['meeting'], 'i' => $i, 'n' => $n + 1]);
+                $data[] = $this->pick($cols, $resolvers, ['m' => $r['meeting'], 'i' => $i, 'n' => $n + 1, 'c' => $r['content']]);
             }
         }
 

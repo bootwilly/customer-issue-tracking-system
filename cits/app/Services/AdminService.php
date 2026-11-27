@@ -4,8 +4,11 @@ namespace App\Services;
 
 use App\Models\Project;
 use App\Models\User;
+use App\Repositories\ApiTokenRepository;
 use App\Repositories\ProjectRepository;
+use App\Repositories\UnitOfWork;
 use App\Repositories\UserRepository;
+use App\Repositories\WatchRepository;
 use DomainException;
 use Illuminate\Support\Collection;
 use Spatie\Permission\Models\Role;
@@ -15,6 +18,9 @@ class AdminService
     public function __construct(
         private UserRepository $users,
         private ProjectRepository $projects,
+        private ApiTokenRepository $tokens,
+        private WatchRepository $watches,
+        private UnitOfWork $uow,
     ) {}
 
     /**
@@ -65,8 +71,35 @@ class AdminService
         if (empty($data['password'])) {
             unset($data['password']);
         }
+        $typeChanged = isset($data['user_type']) && $data['user_type'] !== $user->user_type;
 
-        return $this->users->update($user, $data);
+        return $this->uow->run(function () use ($user, $data, $typeChanged) {
+            $updated = $this->users->update($user, $data);
+            if ($typeChanged) {
+                $this->dropAccessOfOtherType($updated);
+            }
+
+            return $updated;
+        });
+    }
+
+    /**
+     * After an internal <-> client switch: roles of the other type are removed in every project; a user who became
+     * a client also loses internal-only things (MCP tokens, issue watches).
+     */
+    private function dropAccessOfOtherType(User $user): void
+    {
+        foreach ($this->projects->projectIdsByUser([$user->id])[$user->id] as $pid) {
+            $roles = $this->projects->roleNames($user, $pid);
+            $keep = array_values(array_filter($roles, fn (string $r) => $this->roleMatchesUserType($r, $user->user_type)));
+            if ($keep !== $roles) {
+                $this->projects->syncRoles($user, $pid, $keep);
+            }
+        }
+        if ($user->isClient()) {
+            $this->tokens->revokeAllFor($user->id);
+            $this->watches->removeAllFor('issue', $user->id);
+        }
     }
 
     public function deleteUser(User $user, User $actor): void

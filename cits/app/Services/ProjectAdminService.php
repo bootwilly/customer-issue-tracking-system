@@ -61,7 +61,8 @@ class ProjectAdminService
         $protected = $this->protectedRoles($u);
 
         return $this->admin->membersWithRoles($this->project($pid))->map(fn ($m) => $m + [
-            'locked' => $m['user']->id === $u->id || (bool) array_intersect($m['roles'], $protected),
+            // system admins are managed by system admins only, whatever roles they hold in the project
+            'locked' => $m['user']->id === $u->id || (! $u->is_admin && $m['user']->is_admin) || (bool) array_intersect($m['roles'], $protected),
         ]);
     }
 
@@ -77,8 +78,17 @@ class ProjectAdminService
     public function candidates(User $u, int $pid): Collection
     {
         $this->wf->authorize($u, 'project.members', $pid);
+        $all = $this->admin->candidates($this->project($pid));
+        if ($u->is_admin) {
+            return $all;
+        }
+        // A project admin sees client accounts only when they are in no project yet, or only in projects the
+        // project admin also belongs to: another customer's accounts are neither listed nor addable.
+        $clients = $all->filter(fn (User $c) => $c->isClient());
+        $byUser = $this->projects->projectIdsByUser([$u->id, ...$clients->pluck('id')->all()]);
+        $mine = $byUser[$u->id];
 
-        return $this->admin->candidates($this->project($pid));
+        return $all->filter(fn (User $c) => ! $c->isClient() || array_diff($byUser[$c->id], $mine) === [])->values();
     }
 
     public function addMember(User $u, int $pid, int $userId): void

@@ -4,6 +4,7 @@ use App\Http\Middleware\EnsureAdmin;
 use App\Http\Middleware\EnsureProjectSelected;
 use App\Http\Middleware\EnsureUserActive;
 use App\Http\Middleware\ForceHttps;
+use App\Http\Middleware\LogoutAfterPasswordChange;
 use App\Http\Middleware\LogoutWhenIdle;
 use App\Http\Middleware\SecurityHeaders;
 use Illuminate\Foundation\Application;
@@ -18,8 +19,10 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        // Shared host behind LiteSpeed / reverse proxy.
-        $middleware->trustProxies(at: '*');
+        // Shared host behind a reverse proxy. Only the client IP and the scheme are taken from forwarded headers:
+        // the proxy passes a client-sent X-Forwarded-Host / -Port / -Prefix through untouched, and trusting those
+        // let anyone rewrite every generated URL (password reset links included) to another domain.
+        $middleware->trustProxies(at: '*', headers: Request::HEADER_X_FORWARDED_FOR | Request::HEADER_X_FORWARDED_PROTO);
 
         $middleware->alias([
             'https' => ForceHttps::class,
@@ -33,6 +36,8 @@ return Application::configure(basePath: dirname(__DIR__))
         // Idle sign-out runs after the session starts (appended to the web group).
         $middleware->appendToGroup('web', LogoutWhenIdle::class);
         $middleware->appendToGroup('web', SecurityHeaders::class);
+        // After a password change or reset, every other session of that account is signed out.
+        $middleware->appendToGroup('web', LogoutAfterPasswordChange::class);
         // Closures so the URL keeps the sub-path (/mescits) instead of the domain root.
         $middleware->redirectUsersTo(fn () => route('home'));
         $middleware->redirectGuestsTo(fn () => route('home'));

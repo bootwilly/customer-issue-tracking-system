@@ -51,6 +51,20 @@ class ProjectRepository
         return DB::table('project_members')->where('project_id', $projectId)->where('user_id', $userId)->exists();
     }
 
+    /**
+     * @param  int[]  $userIds
+     * @return array<int, int[]> project ids each user is a member of
+     */
+    public function projectIdsByUser(array $userIds): array
+    {
+        $out = array_fill_keys($userIds, []);
+        foreach (DB::table('project_members')->whereIn('user_id', $userIds)->get(['user_id', 'project_id']) as $r) {
+            $out[(int) $r->user_id][] = (int) $r->project_id;
+        }
+
+        return $out;
+    }
+
     public function members(Project $project): Collection
     {
         return $project->members()->orderBy('account')->get();

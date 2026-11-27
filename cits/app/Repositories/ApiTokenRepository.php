@@ -33,6 +33,11 @@ class ApiTokenRepository
         $t->forceFill(['revoked_at' => now()])->save();
     }
 
+    public function revokeAllFor(int $userId): void
+    {
+        ApiToken::where('user_id', $userId)->whereNull('revoked_at')->update(['revoked_at' => now()]);
+    }
+
     public function touchLastUsed(ApiToken $t): void
     {
         $t->forceFill(['last_used_at' => now()])->saveQuietly();

@@ -60,7 +60,7 @@
                                 <button type="submit" class="text-sm text-indigo-700 hover:underline">{{ $it->is_active ? '停用' : '啟用' }}</button>
                             </form>
                             @if ($it->usage === 0)
-                                <form method="POST" action="{{ route('admin.lookups.destroy', [$category, $it->id]) }}" class="ml-3 inline" onsubmit="return confirm('確定刪除「{{ $it->name }}」？')">
+                                <form method="POST" action="{{ route('admin.lookups.destroy', [$category, $it->id]) }}" class="ml-3 inline" onsubmit="return confirm(@js('確定刪除「'.$it->name.'」？'))">
                                     @csrf @method('DELETE')
                                     <button type="submit" class="text-sm text-red-600 hover:underline">刪除</button>
                                 </form>

@@ -53,9 +53,10 @@ class IssueController extends Controller
             'process_type' => 'nullable|string|max:30', 'mes_page_id' => 'nullable|integer|exists:mes_pages,id',
             'planned_start' => 'nullable|date', 'dev_note' => 'nullable|string|max:5000',
         ]);
+        $draft = $request->validate(['draft' => 'nullable|string|max:100'])['draft'] ?? null;
 
-        return $this->act(function () use ($u, $id, $in) {
-            $this->issues->updateFields($u, $id, $this->pid(), $this->q->editableInput($id, $this->pid(), $u, $in));
+        return $this->act(function () use ($u, $id, $in, $draft) {
+            $this->issues->updateFields($u, $id, $this->pid(), $this->q->editableInput($id, $this->pid(), $u, $in), $draft);
         }, '已更新欄位。');
     }
 

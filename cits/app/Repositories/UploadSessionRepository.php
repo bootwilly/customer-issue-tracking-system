@@ -22,6 +22,12 @@ class UploadSessionRepository
         $s->update(['received_chunks' => $count]);
     }
 
+    /** Atomically move a session from one status to another; false when another request got there first. */
+    public function claim(UploadSession $s, string $from, string $to): bool
+    {
+        return UploadSession::whereKey($s->id)->where('status', $from)->update(['status' => $to]) === 1;
+    }
+
     public function setStatus(UploadSession $s, string $status): void
     {
         $s->update(['status' => $status]);

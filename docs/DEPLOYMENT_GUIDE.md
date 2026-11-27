@@ -182,7 +182,7 @@ foreach ($d in 'app\private','app\public','framework\cache\data','framework\sess
 ```bash
 cd "$S" && find cits docs deploy -type f -not -path "*/vendor/*" -not -path "*/node_modules/*" -print0 | sort -z | xargs -0 md5sum > ../snap.md5
 cd cits && ASSET_URL=/mescits npm run build          # Windows 上是 npm.cmd
-php artisan test                                      # 必須全過（目前 230 個）
+php artisan test                                      # 必須全過（目前 250 個）
 ```
 - `ASSET_URL=/mescits` 一定要帶，否則前端檔路徑會錯。
 - 測試沒全過就停止部署。
@@ -304,7 +304,7 @@ python -I deploy/build.py --no-npm
    - `login.max_attempts`／`login.decay_minutes`：同一個帳號加 IP 的失敗上限（5 次／15 分鐘）。
    - `login.account_max_attempts`／`login.account_decay_minutes`：同一個帳號不論 IP 的失敗上限（10 次／15 分鐘，0 = 關閉）。因為 IP 可以被偽造，這層才擋得住暴力破解。
    - `attachment.allowed_ext`：附件可上傳的副檔名，逗號分隔。
-   - 登入紀錄在「系統管理 → 登入紀錄」。IP 取自 `Request::ip()`（主機前面是 openresty 代理，`trustProxies('*')` 會採用代理附加在 `X-Forwarded-For` 最右邊的值）；原始 `X-Forwarded-For` 也一起存。
+   - 登入紀錄在「系統管理 → 登入紀錄」。IP 取自 `Request::ip()`（主機前面是 openresty 代理，`trustProxies('*')` 會採用代理附加在 `X-Forwarded-For` 最右邊的值；2026-11-27 起只信任 For 和 Proto 兩個標頭）；原始 `X-Forwarded-For` 也一起存。
    - **2026-11-27 實測**：正式站的 openresty 會把連線端自己送的 `X-Forwarded-For` 拿來當 `REMOTE_ADDR`，並刪掉原本的標頭，PHP 拿不到真實 IP。一般瀏覽器記到的 IP 是正確的，但 IP 可以被偽造。要根本解決，請主機商只信任自己代理的 `X-Forwarded-For`。
 
 ---
@@ -337,6 +337,7 @@ python -I deploy/build.py --no-npm
 | 14:35 | 手冊完整版 | 無 |
 | 11-27 | 登入紀錄（含來源 IP，`auth_logs`） | upgrade-20261126-1633.sql |
 | 11-27 | 依帳號的登入限制、附件類型、顯示時再過濾 HTML、安全標頭 | upgrade-20261126-1700.sql |
+| 11-27 | 資安稽核修補兩批（Host 竄改、跨專案引用、行內 JS 跳脫、會議單號外洩、圖片路徑、drawio、附件權限、改密碼登出其他 session 等） | 無 |
 | 11-27 00:05 | 閒置 60 分鐘自動登出（54aafc7） | 無 |
 
 ---

@@ -94,6 +94,6 @@ class PmTicketController extends Controller
         $u = $this->guard($request, 'issue.edit_pm');
         $d = $request->validate(['issue_id' => 'required|integer', 'comment_id' => 'required|integer']);
 
-        return $this->act(fn () => $this->issues->quoteComment($u, (int) $d['issue_id'], $this->pid(), (int) $d['comment_id']), '已引用到內部單補充說明。');
+        return $this->act(fn () => $this->issues->quoteComment($u, (int) $d['issue_id'], $this->pid(), $id, (int) $d['comment_id']), '已引用到內部單補充說明。');
     }
 }

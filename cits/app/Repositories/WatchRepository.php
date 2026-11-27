@@ -30,6 +30,12 @@ class WatchRepository
         return DB::table($table)->where([$col => $id, 'user_id' => $userId])->exists();
     }
 
+    public function removeAllFor(string $subject, int $userId): void
+    {
+        [$table] = self::TABLES[$subject];
+        DB::table($table)->where('user_id', $userId)->delete();
+    }
+
     /** @return Collection<int, User> active watchers, oldest subscription first */
     public function watchers(string $subject, int $id): Collection
     {

@@ -42,7 +42,7 @@
                             @endif
                         </form>
                         @unless ($m['locked'])
-                            <form method="POST" action="{{ route('padmin.members.destroy', $mu->id) }}" onsubmit="return confirm('確定把 {{ $mu->account }} 移出專案？角色與流程圖編輯資格都會一併失去。')">
+                            <form method="POST" action="{{ route('padmin.members.destroy', $mu->id) }}" onsubmit="return confirm(@js('確定把 '.$mu->account.' 移出專案？角色與流程圖編輯資格都會一併失去。'))">
                                 @csrf @method('DELETE')
                                 <button type="submit" class="text-sm text-red-600 hover:underline">移出</button>
                             </form>

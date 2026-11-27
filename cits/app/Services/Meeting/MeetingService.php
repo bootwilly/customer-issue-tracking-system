@@ -317,8 +317,12 @@ class MeetingService
                     $i->setRelation('issue', null);
                 }
                 if (! $full) {
+                    // same as the page before the notes are published: topic only
                     $i->discussion = null;
                     $i->conclusion = null;
+                    $i->owner_id = null;
+                    $i->setRelation('owner', null);
+                    $i->due_date = null;
                 }
             });
             $out[] = [

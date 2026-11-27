@@ -71,7 +71,11 @@ class EventRepository
             return;
         }
         $now = now();
-        foreach (User::whereIn('id', $userIds)->where('status', 'active')->get(['id', 'email', 'email_notify']) as $u) {
+        $recipients = User::whereIn('id', $userIds)->where('status', 'active')
+            // people removed from the project (old assignees, watchers) no longer get its notifications
+            ->when($projectId !== null, fn ($q) => $q->where(fn ($w) => $w->where('is_admin', true)
+                ->orWhereIn('id', DB::table('project_members')->where('project_id', $projectId)->select('user_id'))));
+        foreach ($recipients->get(['id', 'email', 'email_notify']) as $u) {
             UserNotification::create(['user_id' => $u->id, 'project_id' => $projectId, 'title' => $title, 'url' => $url, 'created_at' => $now]);
             if (! $u->email_notify) {
                 continue;

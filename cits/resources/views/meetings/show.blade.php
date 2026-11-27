@@ -34,7 +34,7 @@
         <div class="flex flex-wrap items-center gap-2 text-sm">
             @foreach ($statusTargets as $t)
                 @php $meta = $wf->status('meeting', $t['code']); @endphp
-                <form method="POST" action="{{ route('meetings.status', $m->id) }}" @if ($meta->is_terminal) onsubmit="return confirm('確定改為「{{ $t['name'] }}」？')" @endif>
+                <form method="POST" action="{{ route('meetings.status', $m->id) }}" @if ($meta->is_terminal) onsubmit="return confirm(@js('確定改為「'.$t['name'].'」？'))" @endif>
                     @csrf
                     <input type="hidden" name="to" value="{{ $t['code'] }}">
                     <button type="submit" class="{{ $btn }} {{ $meta->is_released ? 'bg-emerald-600 font-medium text-white hover:bg-emerald-700' : 'bg-white text-slate-700 ring-1 ring-slate-300 hover:bg-slate-50' }}">

@@ -7,6 +7,7 @@ use App\Models\ClientTicket;
 use App\Models\Issue;
 use App\Models\IssueComment;
 use App\Models\Meeting;
+use App\Models\Project;
 use App\Models\SystemSetting;
 use App\Models\TicketComment;
 use App\Models\User;
@@ -75,6 +76,11 @@ class AttachmentRepository
             ->where(fn ($q) => $q->whereNotNull('published_at')
                 ->orWhereIn('created_by', User::query()->select('id')->where('user_type', 'client')))
             ->exists();
+    }
+
+    public function projectIsActive(int $projectId): bool
+    {
+        return Project::query()->whereKey($projectId)->where('status', 'active')->exists();
     }
 
     public function isProjectMember(int $userId, int $projectId): bool

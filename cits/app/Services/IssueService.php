@@ -8,6 +8,7 @@ use App\Models\Package;
 use App\Models\User;
 use App\Repositories\EventRepository;
 use App\Repositories\IssueRepository;
+use App\Repositories\MesPageRepository;
 use App\Repositories\TicketRepository;
 use App\Repositories\UnitOfWork;
 use App\Services\Collab\DependencyService;
@@ -41,7 +42,16 @@ class IssueService
         private UnitOfWork $uow,
         private WatchService $watch,
         private DependencyService $deps,
+        private MesPageRepository $mesPages,
     ) {}
+
+    /** The MES page of an issue must be an active page of the same project (the form only offers those). */
+    private function checkMesPage(int $projectId, mixed $id): void
+    {
+        if ($id !== null && $id !== '' && ! $this->mesPages->isActivePage($projectId, (int) $id)) {
+            throw new BusinessException('MES 頁面不存在或不屬於此專案。');
+        }
+    }
 
     public function get(int $id, int $projectId, User $u): Issue
     {
@@ -117,6 +127,10 @@ class IssueService
 
         return $this->uow->run(function () use ($u, $projectId, $ticketIds, $d, $draft) {
             $tickets = $this->tickets->lockMany($ticketIds);
+            // same message for missing ids and other projects' tickets: no ticket number of another project leaks
+            if ($tickets->count() !== count(array_unique($ticketIds)) || $tickets->contains(fn ($t) => $t->project_id !== $projectId)) {
+                throw new BusinessException('客戶單不存在或不屬於此專案。');
+            }
             foreach ($tickets as $t) {
                 if ($t->project_id !== $projectId || $t->accepted_at === null || $this->wf->status('ticket', $t->status)->is_terminal) {
                     throw new BusinessException("{$t->ticket_no} 尚未接收或已結束，不能建立內部單。");
@@ -128,7 +142,9 @@ class IssueService
                 $this->tickets->save($t, ['needs_pm_action' => false]);
                 $this->events->log($projectId, 'ticket', $t->id, 'linked', null, null, $u->id, ['issue' => $issue->issue_no]);
             }
-            $this->tickets->ackRevisions($tickets->first()->id, $u->id);
+            foreach ($tickets as $t) {
+                $this->tickets->ackRevisions($t->id, $u->id);
+            }
 
             return $issue;
         });
@@ -153,6 +169,7 @@ class IssueService
         $status = $this->wf->initial('issue_initial', $origin);
         $st = $this->wf->status('issue', $status);
         $this->checkScale($d['severity'] ?? null, '嚴重程度');
+        $this->checkMesPage($projectId, $d['mes_page_id'] ?? null);
         $issue = $this->issues->create([
             'project_id' => $projectId,
             'issue_no' => $this->numbers->next($projectId, 'issue'),
@@ -182,9 +199,9 @@ class IssueService
     }
 
     /** Edit fields; each field checked against field_edit_rules. */
-    public function updateFields(User $u, int $id, int $projectId, array $d): Issue
+    public function updateFields(User $u, int $id, int $projectId, array $d, ?string $draft = null): Issue
     {
-        return $this->uow->run(function () use ($u, $id, $projectId, $d) {
+        return $this->uow->run(function () use ($u, $id, $projectId, $d, $draft) {
             $i = $this->locked($id, $projectId, $u);
             $changes = [];
             foreach ($d as $field => $value) {
@@ -200,6 +217,9 @@ class IssueService
                 if (in_array($field, ['severity', 'difficulty'], true)) {
                     $this->checkScale($value, $field === 'severity' ? '嚴重程度' : '難易度');
                 }
+                if ($field === 'mes_page_id' && (int) $value !== (int) $i->mes_page_id) {
+                    $this->checkMesPage($projectId, $value);
+                }
                 $current = $i->{$field} instanceof \DateTimeInterface ? $i->{$field}->format('Y-m-d') : $i->{$field};
                 if ($current != $value) {
                     $changes[$field] = $value;
@@ -208,6 +228,11 @@ class IssueService
             if ($changes) {
                 $this->issues->save($i, $changes);
                 $this->events->log($projectId, 'issue', $i->id, 'fields', null, null, $u->id, ['fields' => array_keys($changes)]);
+            }
+            // images pasted while editing are temp uploads: bind them to the issue (else 403 for others, purged after 7 days)
+            if (array_key_exists('content_html', $d)) {
+                $this->content->bind((string) $i->content_html, 'issue', $i->id, $draft);
+                $this->content->clearDraft($u->id, $draft);
             }
 
             return $i;
@@ -598,12 +623,17 @@ class IssueService
     }
 
     /** PM quotes a client supplement comment into an issue's addenda. */
-    public function quoteComment(User $u, int $id, int $projectId, int $ticketCommentId): void
+    public function quoteComment(User $u, int $id, int $projectId, int $ticketId, int $ticketCommentId): void
     {
-        $this->uow->run(function () use ($u, $id, $projectId, $ticketCommentId) {
+        $this->uow->run(function () use ($u, $id, $projectId, $ticketId, $ticketCommentId) {
             $this->wf->authorize($u, 'issue.edit_pm', $projectId);
             $i = $this->get($id, $projectId, $u);
-            $c = $this->issues->ticketComment($ticketCommentId) ?? throw new BusinessException('留言不存在。');
+            // the comment must belong to this ticket, the ticket to this project, and the ticket be linked to the issue
+            $c = $this->issues->linkedTicketComment($i->id, $ticketId, $ticketCommentId, $projectId)
+                ?? throw new BusinessException('留言不存在，或該客戶單沒有連結到這張內部單。');
+            if (! $c->author?->isClient()) {
+                throw new BusinessException('只能引用客戶的留言。');
+            }
             $this->issues->addAddendum($i->id, '<blockquote>'.$c->content_html.'</blockquote>', $u->id, $c->id);
             $this->events->log($projectId, 'issue', $i->id, 'addendum', null, null, $u->id, ['note' => '引用客戶留言']);
         });

@@ -20,6 +20,12 @@ class MesPageRepository
             ->orderBy('name')->get(['id', 'name', 'page_path']);
     }
 
+    /** Whether the id is one of activePages($projectId): an active page of that project. */
+    public function isActivePage(int $projectId, int $id): bool
+    {
+        return $this->activePages($projectId)->contains('id', $id);
+    }
+
     public function find(int $id): ?MesPage
     {
         return MesPage::find($id);

@@ -79,7 +79,7 @@
             @endif
 
             @if ($canEditDraft && $flow->hasDraft() && $flow->isPublished())
-                <form method="POST" action="{{ route('flows.discard', $flow->id) }}" onsubmit="return confirm('確定捨棄草稿？草稿與所有儲存紀錄都會清掉，回到第 {{ $flow->version }} 版。')">
+                <form method="POST" action="{{ route('flows.discard', $flow->id) }}" onsubmit="return confirm(@js('確定捨棄草稿？草稿與所有儲存紀錄都會清掉，回到第 '.$flow->version.' 版。'))">
                     @csrf
                     <button type="submit" class="w-full {{ $btn }} bg-white text-slate-700 ring-1 ring-slate-300 hover:bg-slate-50">捨棄草稿</button>
                 </form>
@@ -90,7 +90,7 @@
                     <h2 class="mb-2 text-sm font-semibold text-slate-700">狀態：{{ $statusLabel }}</h2>
                     <div class="flex flex-wrap gap-2">
                         @foreach ($statusTargets as $t)
-                            <form method="POST" action="{{ route('flows.status', $flow->id) }}" onsubmit="return confirm('確定變更為「{{ $t['name'] }}」？')">
+                            <form method="POST" action="{{ route('flows.status', $flow->id) }}" onsubmit="return confirm(@js('確定變更為「'.$t['name'].'」？'))">
                                 @csrf
                                 <input type="hidden" name="to" value="{{ $t['code'] }}">
                                 <button type="submit" class="{{ $btn }} bg-slate-100 hover:bg-slate-200">設為{{ $t['name'] }}</button>
@@ -134,7 +134,7 @@
                                 @if ($i === 0)
                                     <span class="text-xs text-slate-400">目前</span>
                                 @elseif ($canEditDraft)
-                                    <form method="POST" action="{{ route('flows.snapshots.restore', [$flow->id, $s->id]) }}" onsubmit="return confirm('把草稿還原成第 {{ $s->draft_rev }} 次儲存的內容？')">
+                                    <form method="POST" action="{{ route('flows.snapshots.restore', [$flow->id, $s->id]) }}" onsubmit="return confirm(@js('把草稿還原成第 '.$s->draft_rev.' 次儲存的內容？'))">
                                         @csrf
                                         <button type="submit" class="text-xs text-indigo-700 hover:underline">還原</button>
                                     </form>
@@ -168,7 +168,7 @@
             @endif
 
             @if ($canDelete)
-                <form method="POST" action="{{ route('flows.destroy', $flow->id) }}" onsubmit="return confirm('確定刪除「{{ $flow->title }}」？會移到回收筒，專案管理員可以還原。')">
+                <form method="POST" action="{{ route('flows.destroy', $flow->id) }}" onsubmit="return confirm(@js('確定刪除「'.$flow->title.'」？會移到回收筒，專案管理員可以還原。'))">
                     @csrf @method('DELETE')
                     <button type="submit" class="w-full text-sm text-red-600 hover:underline">刪除流程圖</button>
                 </form>

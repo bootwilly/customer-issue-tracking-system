@@ -158,6 +158,7 @@ it('skips outbox rows for opted-out users but keeps in-app notifications', funct
     $p = Project::create(['code' => 'P1', 'name' => 'P1', 'ticket_prefix' => 'A']);
     $on = ntUser();
     $off = ntUser(['email_notify' => false]);
+    $p->members()->attach([$on->id, $off->id]);
     app(EventRepository::class)->notify([$on->id, $off->id], $p->id, 'Hello', '/issues/1', true);
 
     expect(UserNotification::count())->toBe(2)

@@ -24,6 +24,7 @@ class AttachmentService
         private AttachmentRepository $attachments,
         private UploadSessionRepository $sessions,
         private DraftRepository $drafts,
+        private WorkflowService $wf,
     ) {}
 
     private function disk()
@@ -66,6 +67,7 @@ class AttachmentService
         if (pathinfo($name, PATHINFO_EXTENSION) === '') {
             $name .= '.'.($file->guessExtension() ?: 'png');
         }
+        $name = $this->cleanName($name);
         $this->assertNameAndSize($name, (int) $file->getSize());
 
         $tmp = $file->getRealPath();
@@ -80,6 +82,7 @@ class AttachmentService
     /** @return array{id:string, chunk_size:int} */
     public function initUpload(User $user, string $name, int $size, ?string $context): array
     {
+        $name = $this->cleanName($name);
         $this->assertNameAndSize($name, $size);
         $session = $this->sessions->create([
             'user_id' => $user->id,
@@ -113,6 +116,10 @@ class AttachmentService
     public function completeUpload(User $user, string $sessionId): Attachment
     {
         $s = $this->ownedSession($user, $sessionId);
+        // two "complete" calls for one session must not both assemble and store the file
+        if (! $this->sessions->claim($s, 'open', 'assembling')) {
+            throw new BusinessException('上傳工作階段無效');
+        }
         $dir = "chunks/{$s->id}";
         $this->disk()->makeDirectory($dir);
         $assembled = $this->disk()->path("$dir/assembled.tmp");
@@ -144,9 +151,25 @@ class AttachmentService
             $this->sessions->setStatus($s, 'done');
 
             return $att;
+        } catch (\Throwable $e) {
+            // release the claim so the client can send missing chunks and complete again
+            $this->sessions->claim($s, 'assembling', 'open');
+
+            throw $e;
         } finally {
             $this->disk()->deleteDirectory($dir);
         }
+    }
+
+    /**
+     * File name as shown and offered for download: no path separators (Content-Disposition refuses / and \\)
+     * and no control characters.
+     */
+    private function cleanName(string $name): string
+    {
+        $name = trim((string) preg_replace('/[\x00-\x1F\x7F]/u', '', str_replace(['/', '\\'], '_', $name)));
+
+        return $name === '' ? 'file' : $name;
     }
 
     private function ownedSession(User $user, string $id): UploadSession
@@ -241,7 +264,8 @@ class AttachmentService
         if ($user->is_admin && ! $meetingFile) {
             return true;
         }
-        if (! $meetingFile && $a->uploaded_by === $user->id) {
+        // the uploader keeps access only while the file is unsaved; once bound it follows the container's rules
+        if ($a->state === 'temp' && $a->uploaded_by === $user->id) {
             return true;
         }
         if ($a->state !== 'bound' || ! $a->owner_type || ! $a->owner_id) {
@@ -254,8 +278,18 @@ class AttachmentService
             return false;
         }
         $projectId = $this->attachments->projectIdForOwner($a->owner_type, (int) $a->owner_id);
+        if ($projectId === null) {
+            return false;
+        }
+        if ($user->is_admin) {
+            return true;
+        }
+        $perm = config('attachments.view_permissions.'.$a->owner_type);
 
-        return $projectId !== null && ($user->is_admin || $this->attachments->isProjectMember($user->id, $projectId));
+        return $perm !== null
+            && $this->attachments->isProjectMember($user->id, $projectId)
+            && $this->attachments->projectIsActive($projectId)
+            && $this->wf->can($user, $perm, $projectId);
     }
 
     /** 儲存成功後呼叫：綁定 html 內引用的暫存附件，刪除同 context 未引用者 */

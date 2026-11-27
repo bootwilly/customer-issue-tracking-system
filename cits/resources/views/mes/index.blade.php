@@ -5,7 +5,7 @@
 
     @if ($canManage)
     <div class="mb-6 grid gap-4 lg:grid-cols-2">
-        <form method="POST" action="{{ route('mes.store') }}" class="space-y-3 rounded-lg bg-white p-4 shadow-sm" x-data="{ type: '{{ old('node_type', 'page') }}' }">
+        <form method="POST" action="{{ route('mes.store') }}" class="space-y-3 rounded-lg bg-white p-4 shadow-sm" x-data="{ type: @js((string) old('node_type', 'page')) }">
             @csrf
             <h2 class="text-sm font-semibold text-slate-700">新增資料夾 / 頁面</h2>
             <div class="flex gap-4 text-sm">

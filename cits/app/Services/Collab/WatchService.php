@@ -129,6 +129,8 @@ class WatchService
     {
         $watchers = $this->capped($this->issueWatchers($i), $i->project_id)->pluck('id')->all();
         $all = array_values(array_diff(array_unique(array_map('intval', array_filter(array_merge($ids, $watchers)))), [(int) $actorId]));
+        // issues are internal: never notify a client account (e.g. a former internal user switched to client)
+        $all = $this->users->notificationUsers($all)->filter(fn (User $u) => $u->seesInternal())->pluck('id')->all();
         $this->events->notify($all, $i->project_id, $title, "/issues/{$i->id}", $this->mail());
     }
 

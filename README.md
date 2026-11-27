@@ -26,6 +26,9 @@
 - 編輯器內容在存檔時和顯示時各用白名單過濾一次 HTML（`SanitizerService`、`@richtext`），會移除 script、事件屬性、`javascript:` 連結和外部圖片。
 - 附件只接受設定的副檔名（`attachment.allowed_ext`，預設為 Office、PDF、文字、JSON、Markdown、壓縮檔、圖片、影片），並檢查實際內容；HTML、SVG、JavaScript 一律拒絕；直接開啟附件時套用 CSP sandbox。
 - 所有頁面都加上 CSP（object-src、base-uri、frame-ancestors、form-action）、nosniff、X-Frame-Options、Referrer-Policy。
+- 反向代理只採用 `X-Forwarded-For` 和 `X-Forwarded-Proto`（不採用 Host／Port／Prefix，避免重設密碼連結被改成其他網域）。
+- 帳號的密碼在其他地方變更或重設後，其他 session 會被登出（`LogoutAfterPasswordChange`）。
+- 附件依所屬單據的檢視權限開放（`config/attachments.php`）；內文圖片只允許本站的 `/attachments/{id}`。
 
 ---
 
@@ -35,7 +38,7 @@
 - **後端**：PHP 8.3 以上（以 8.5 測試）、Laravel 13、spatie/laravel-permission（角色以專案為單位）、openspout（Excel）、symfony/html-sanitizer
 - **前端**：Blade、Alpine.js、Tailwind CSS 4、Vite；TipTap 編輯器；Mermaid；自架 draw.io
 - **資料庫**：MariaDB、MySQL（正式環境），SQLite（開發和測試）
-- **測試**：Pest（230 個 feature test）
+- **測試**：Pest（250 個 feature test）
 
 ### 分層
 ```

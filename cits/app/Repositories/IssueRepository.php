@@ -2,6 +2,7 @@
 
 namespace App\Repositories;
 
+use App\Models\ClientTicket;
 use App\Models\DueChangeRequest;
 use App\Models\Issue;
 use App\Models\IssueAddendum;
@@ -105,9 +106,16 @@ class IssueRepository
         return IssueAddendum::create(['issue_id' => $issueId, 'content_html' => $html, 'source_comment_id' => $sourceCommentId, 'created_by' => $userId, 'created_at' => now()]);
     }
 
-    public function ticketComment(int $id): ?TicketComment
+    /** A comment of a ticket in the project that is linked to the issue; null otherwise. */
+    public function linkedTicketComment(int $issueId, int $ticketId, int $commentId, int $projectId): ?TicketComment
     {
-        return TicketComment::find($id);
+        return TicketComment::query()
+            ->whereKey($commentId)
+            ->where('ticket_id', $ticketId)
+            ->whereIn('ticket_id', ClientTicket::query()->select('id')->where('project_id', $projectId)
+                ->whereHas('issues', fn ($q) => $q->where('issues.id', $issueId)))
+            ->with('author')
+            ->first();
     }
 
     public function createDueRequest(array $data): DueChangeRequest
