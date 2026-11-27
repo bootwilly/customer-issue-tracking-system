@@ -40,6 +40,73 @@ function isDrawingPng(uri) {
     }
 }
 
+const AUTO_ANNOTATE_KEY = 'cits:meeting:auto-annotate';
+const imageFiles = (list) => [...(list ?? [])].filter((f) => f.type?.startsWith('image/'));
+
+/**
+ * Fallback when the clipboard cannot be read directly (no permission, Firefox, iOS refusing): a box the user pastes
+ * into (Ctrl+V, or long-press → 貼上 on a phone keyboard, which delivers clipboard pictures to editable areas).
+ * @returns {Promise<File[]>} pasted pictures ([] = cancelled)
+ */
+function pasteDialog(reason) {
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4';
+        overlay.innerHTML = `
+            <div class="w-full max-w-md rounded-lg bg-white p-4 shadow-xl">
+                <h2 class="font-semibold">貼上截圖</h2>
+                <p class="mt-1 text-xs text-slate-500"></p>
+                <div data-zone contenteditable="true" class="mt-3 flex h-32 items-center justify-center rounded border-2 border-dashed border-indigo-300 bg-indigo-50 p-2 text-center text-sm text-indigo-700 outline-none focus:border-indigo-500">
+                    在這裡按 Ctrl+V（手機：長按 → 貼上）
+                </div>
+                <div class="mt-3 text-right"><button type="button" data-cancel class="rounded-md px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100">取消</button></div>
+            </div>`;
+        overlay.querySelector('p').textContent = reason;
+        const zone = overlay.querySelector('[data-zone]');
+        const close = (files) => {
+            document.removeEventListener('keydown', onKey, true);
+            overlay.remove();
+            resolve(files);
+        };
+        const onKey = (e) => e.key === 'Escape' && close([]);
+        zone.addEventListener('paste', (e) => {
+            e.preventDefault();
+            const files = imageFiles(e.clipboardData?.files);
+            if (files.length) close(files);
+            else zone.textContent = '剪貼簿裡沒有圖片：請先截圖或複製圖片，再貼一次。';
+        });
+        zone.addEventListener('beforeinput', (e) => e.inputType !== 'insertFromPaste' && e.preventDefault()); // no typing in the box
+        overlay.querySelector('[data-cancel]').addEventListener('click', () => close([]));
+        overlay.addEventListener('click', (e) => e.target === overlay && close([]));
+        document.addEventListener('keydown', onKey, true);
+        document.body.appendChild(overlay);
+        zone.focus();
+    });
+}
+
+/**
+ * Pictures on the clipboard (screenshot / copied image), read straight away where the browser allows it
+ * (must run inside the click), otherwise through the paste box.
+ * @returns {Promise<File[]>}
+ */
+async function clipboardImages() {
+    if (navigator.clipboard?.read) {
+        try {
+            const files = [];
+            for (const item of await navigator.clipboard.read()) {
+                const type = item.types.find((t) => t.startsWith('image/'));
+                if (type) files.push(new File([await item.getType(type)], `paste-${Date.now()}.png`, { type }));
+            }
+            if (files.length) return files;
+            return pasteDialog('剪貼簿裡沒有圖片。請先截圖或複製圖片，然後在下面的框貼上。');
+        } catch {
+            // permission refused / not allowed here: fall through to the paste box
+        }
+    }
+
+    return pasteDialog('瀏覽器不讓網頁直接讀取剪貼簿，請在下面的框貼上。');
+}
+
 function viewImage(src) {
     const overlay = document.createElement('div');
     overlay.className = 'fixed inset-0 z-50 flex cursor-zoom-out items-center justify-center bg-slate-900/80 p-4';
@@ -63,6 +130,15 @@ function init(list) {
     const template = list.parentElement.querySelector('template[data-item-template]');
     const imageTemplate = list.parentElement.querySelector('template[data-image-template]');
     const imagesMax = Number(list.dataset.imagesMax) || 0;
+    const autoBox = list.parentElement.querySelector('[data-auto-annotate]');
+    if (autoBox) {
+        try {
+            autoBox.checked = localStorage.getItem(AUTO_ANNOTATE_KEY) === '1';
+            autoBox.addEventListener('change', () => localStorage.setItem(AUTO_ANNOTATE_KEY, autoBox.checked ? '1' : '0'));
+        } catch {
+            // storage blocked: the box still works for this page
+        }
+    }
 
     /** POST /uploads/image: the picture becomes the user's unsaved attachment; returns its id. */
     async function uploadPicture(file) {
@@ -236,8 +312,9 @@ function init(list) {
             return row.dataset.itemId;
         }
 
-        async function addFiles(files) {
-            const pics = [...files].filter((f) => f.type.startsWith('image/'));
+        /** @param {boolean} pasted  a screenshot from the clipboard: may go straight into 標記 */
+        async function addFiles(files, pasted = false) {
+            const pics = imageFiles(files);
             if (!pics.length) return;
             try {
                 const id = await itemId();
@@ -250,7 +327,11 @@ function init(list) {
                 setState(row, '已儲存');
             } catch (err) {
                 setState(row, err.message, true);
+                return;
             }
+            // one pasted screenshot + "貼上後直接標記": open it (the newest picture is the last one)
+            const figs = holder.querySelectorAll('[data-image-id]');
+            if (pasted && pics.length === 1 && autoBox?.checked && figs.length) annotate(figs[figs.length - 1]);
         }
 
         async function annotate(fig) {
@@ -284,6 +365,10 @@ function init(list) {
             }
         }
 
+        box.querySelector('[data-image-paste]')?.addEventListener('click', async () => {
+            const files = await clipboardImages();
+            if (files.length) addFiles(files, true);
+        });
         box.querySelector('[data-image-input]')?.addEventListener('change', (e) => {
             addFiles(e.target.files);
             e.target.value = '';
@@ -297,10 +382,10 @@ function init(list) {
         });
         // screenshots pasted into any field of the row, or dropped anywhere on it
         row.addEventListener('paste', (e) => {
-            const files = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'));
+            const files = imageFiles(e.clipboardData?.files);
             if (!files.length) return;
             e.preventDefault();
-            addFiles(files);
+            addFiles(files, true);
         });
         row.addEventListener('dragover', (e) => {
             if ([...(e.dataTransfer?.types ?? [])].includes('Files')) e.preventDefault();

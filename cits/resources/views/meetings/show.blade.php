@@ -80,7 +80,15 @@
             <section id="items" class="{{ $card }}">
                 <div class="mb-2 flex items-center justify-between">
                     <h2 class="text-base font-semibold">討論事項</h2>
-                    @if ($canEdit)<span class="text-xs text-slate-400">邊打邊自動儲存</span>@endif
+                    @if ($canEdit)
+                        <span class="flex items-center gap-3 text-xs text-slate-400">
+                            <label class="flex items-center gap-1 text-slate-600" title="貼上一張截圖後直接開啟標記（畫框、箭頭、文字）">
+                                <input type="checkbox" data-auto-annotate class="rounded border-slate-300"> 貼上後直接標記
+                            </label>
+                            <span class="hidden sm:inline">截圖：按「貼上截圖」或在文字框 Ctrl+V</span>
+                            <span>邊打邊自動儲存</span>
+                        </span>
+                    @endif
                 </div>
                 @if ($canEdit)
                     <div data-items data-url="{{ route('meetings.items.store', $m->id) }}"

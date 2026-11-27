@@ -9,9 +9,12 @@
                 @include('meetings._item-image', ['p' => $p])
             @endforeach
         </div>
-        <label class="flex h-20 w-20 cursor-pointer flex-col items-center justify-center rounded border border-dashed border-slate-300 text-xs text-slate-500 hover:bg-slate-50" title="也可以直接在文字框貼上截圖，或把圖片拖進來">
-            ＋ 圖片<input type="file" accept="image/*" multiple data-image-input class="hidden">
-        </label>
+        <div class="flex flex-col gap-1">
+            <button type="button" data-image-paste class="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">📋 貼上截圖</button>
+            <label class="cursor-pointer text-center text-xs text-slate-500 hover:text-indigo-700 hover:underline">
+                或選擇圖片檔<input type="file" accept="image/*" multiple data-image-input class="hidden">
+            </label>
+        </div>
     </div>
 @elseif ($pics)
     <div class="mt-2 flex flex-wrap gap-2 pl-8">
