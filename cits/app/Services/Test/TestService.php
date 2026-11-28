@@ -9,11 +9,15 @@ use App\Repositories\EventRepository;
 use App\Repositories\IssueRepository;
 use App\Repositories\MesPageRepository;
 use App\Repositories\UserRepository;
+use App\Services\IssueCloseListService;
+use App\Services\IssueDispatchService;
 use App\Services\IssueService;
 use App\Services\WorkflowService;
 
 class TestService
 {
+    public const TABS = ['active' => '測試與上線', 'bounced' => '已退回/新發現', 'close' => '結案收尾'];
+
     public function __construct(
         private IssueRepository $issues,
         private IssueService $issueService,
@@ -21,6 +25,8 @@ class TestService
         private MesPageRepository $mes,
         private UserRepository $users,
         private EventRepository $events,
+        private IssueCloseListService $closeList,
+        private IssueDispatchService $dispatch,
     ) {}
 
     public function canView(User $u, int $pid): bool
@@ -36,11 +42,14 @@ class TestService
     /**
      * Normalised filters of the test page; 'f' is the exact array passed to IssueRepository::paginate.
      *
-     * @return array{tab:string,mine:bool,status:?string,q:string,base:string[],f:array}
+     * @return array{tab:string,mine:bool,status:?string,q:string,base?:string[],f:?array}
      */
     public function filters(User $u, int $pid, array $in): array
     {
-        $tab = in_array($in['tab'] ?? '', ['active', 'bounced'], true) ? $in['tab'] : 'active';
+        $tab = is_string($in['tab'] ?? null) && isset(self::TABS[$in['tab']]) ? $in['tab'] : 'active';
+        if ($tab === 'close') {
+            return $this->closeList->filters($in);
+        }
         $statusMap = $this->wf->statusMap('issue');
         $stageCodes = array_merge($this->wf->codesForStage($this->wf->lookupValue('stage_role', 'test')), $this->wf->codesForStage($this->wf->lookupValue('stage_role', 'release')));
         $base = $tab === 'bounced'
@@ -48,7 +57,7 @@ class TestService
             : $stageCodes;
         $mine = ! empty($in['mine']);
         $status = isset($in['status']) && in_array($in['status'], $base, true) ? $in['status'] : null;
-        $q = trim((string) ($in['q'] ?? ''));
+        $q = is_string($in['q'] ?? null) ? trim($in['q']) : '';
 
         return [
             'tab' => $tab, 'mine' => $mine, 'status' => $status, 'q' => $q, 'base' => $base,
@@ -64,12 +73,17 @@ class TestService
     public function index(User $u, int $pid, array $in): array
     {
         $fl = $this->filters($u, $pid, $in);
+        $data = ['tabs' => self::TABS, 'tab' => $fl['tab'], 'mine' => $fl['mine'], 'status' => $fl['status'],
+            'q' => $fl['q'], 'canManage' => $this->canManage($u, $pid)];
+        if ($fl['tab'] === 'close') {
+            return $data + $this->closeList->page($u, $pid, $fl, testing: true);
+        }
         $issues = $this->issues->paginate($pid, $fl['f'], 20)->appends(['f' => 1]);
 
-        return [
-            'tab' => $fl['tab'], 'mine' => $fl['mine'], 'status' => $fl['status'], 'q' => $fl['q'], 'issues' => $issues,
+        return $data + [
+            'issues' => $issues,
+            'testDispatches' => $this->dispatch->test($pid, $issues->pluck('id')->all()),
             'statusOptions' => $this->wf->statusMap('issue')->only($fl['base'])->map->name->all(),
-            'canManage' => $this->canManage($u, $pid),
         ];
     }
 

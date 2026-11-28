@@ -15,9 +15,12 @@
                     <th class="px-3 py-2">單號</th><th class="px-3 py-2">標題</th><th class="px-3 py-2">來源</th>
                     <th class="px-3 py-2">嚴重度</th><th class="px-3 py-2">難易度</th><th class="px-3 py-2">狀態</th>
                     @if ($isTest)
+                        @foreach (\App\Services\IssueDispatchService::TEST_COLUMNS as $heading)
+                            <th class="px-3 py-2">{{ $heading }}</th>
+                        @endforeach
                         <th class="px-3 py-2">排程測試日</th><th class="px-3 py-2">預計上線日</th>
                     @else
-                        <th class="px-3 py-2">{{ \App\Services\Dev\DevService::DISPATCH_LABEL }}</th>
+                        <th class="px-3 py-2">{{ \App\Services\IssueDispatchService::DEV_LABEL }}</th>
                         <th class="px-3 py-2">預計完工日</th><th class="px-3 py-2">退回</th>
                     @endif
                 </tr>
@@ -39,6 +42,9 @@
                         <td class="px-3 py-2">{{ $i->difficulty ?? '-' }}</td>
                         <td class="whitespace-nowrap px-3 py-2"><x-badge :status="$i->status" scope="issue" /></td>
                         @if ($isTest)
+                            @foreach (\App\Services\IssueDispatchService::TEST_COLUMNS as $key => $heading)
+                                <td class="whitespace-nowrap px-3 py-2">{{ $testDispatches[$i->id][$key] ?? '—' }}</td>
+                            @endforeach
                             <td class="whitespace-nowrap px-3 py-2">{{ $i->test_scheduled_at?->toDateString() ?? '-' }}</td>
                             <td class="whitespace-nowrap px-3 py-2">{{ $i->release_planned_at?->toDateString() ?? '-' }}</td>
                         @else

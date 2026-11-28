@@ -217,7 +217,7 @@ it('keeps each closure round, original target, progress and pending owners in th
     expect($this->svc->devBook($this->dev, $pid, $all)->sheets[0]->rows)->toBeEmpty();
 });
 
-it('scopes release pool rounds by permission and project and protects the dev routes', function () {
+it('scopes release pool rounds by permission and project and protects both management routes', function ($scope) {
     $pid = $this->p->id;
     $close = app(IssueCloseService::class);
     $pool = ieIssue($this->pm, $this->p, 'pm', ['status' => 'release_pending']);
@@ -229,15 +229,15 @@ it('scopes release pool rounds by permission and project and protects the dev ro
     $foreign = ieIssue($secondPm, $second, 'pm', ['status' => 'release_pending']);
     $close->request($secondPm, $second->id, $foreign->id, 'closed_pm', '另一個專案', null);
     $in = ['tab' => 'close', 'mine' => 1];
-    $view = fn ($user, $filters) => ($this->as)($user)->get(route('dev.index', $filters))->assertOk()->viewData('rounds');
+    $view = fn ($user, $filters) => ($this->as)($user)->get(route($scope.'.index', $filters))->assertOk()->viewData('rounds');
     expect($view($this->dev, ['tab' => 'close', 'status' => 'all'])->pluck('issue_id')->all())->toBe([$pool->id])
         ->and($view($this->dev, $in)->total())->toBe(0)
         ->and($view($this->tester, $in)->getCollection()->sole()['pending'])->toBe('上線收尾 上線負責人');
-    ($this->as)($this->client)->get(route('dev.index', $in))->assertForbidden();
-    ($this->as)($this->client)->get(route('dev.export', $in))->assertForbidden();
-});
+    ($this->as)($this->client)->get(route($scope.'.index', $in))->assertForbidden();
+    ($this->as)($this->client)->get(route($scope.'.export', $in))->assertForbidden();
+})->with(['dev', 'test']);
 
-it('exports all matching wrap-up pages in request order and enforces the export limit', function () {
+it('exports all matching wrap-up pages in request order and enforces the export limit', function ($scope) {
     $pid = $this->p->id;
     $issue = ieIssue($this->pm, $this->p, 'pm', ['status' => 'dev_todo', 'assignee_dev_id' => $this->dev->id]);
     $close = app(IssueCloseService::class);
@@ -246,12 +246,116 @@ it('exports all matching wrap-up pages in request order and enforces the export 
         $close->withdraw($this->pm, $pid, $issue->id);
     }
     $in = ['tab' => 'close', 'status' => 'void', 'q' => $issue->issue_no, 'page' => 2];
-    $page = ($this->as)($this->dev)->get(route('dev.index', $in))->assertOk()->viewData('rounds');
+    $page = ($this->as)($this->dev)->get(route($scope.'.index', $in))->assertOk()->viewData('rounds');
     expect($page->total())->toBe(21)->and($page->pluck('round')->all())->toBe([21])
         ->and($page->previousPageUrl())->toContain('tab=close', 'status=void', 'q='.$issue->issue_no);
-    expect(array_column($this->svc->devBook($this->dev, $pid, $in)->sheets[0]->rows, 'round'))->toBe(range(1, 21));
+    $book = $scope === 'dev' ? $this->svc->devBook($this->dev, $pid, $in) : $this->svc->testBook($this->tester, $pid, $in);
+    expect(array_column($book->sheets[0]->rows, 'round'))->toBe(range(1, 21));
     app(SettingRepository::class)->set('export.max_rows', '20');
-    ($this->as)($this->dev)->get(route('dev.export', $in))->assertRedirect(route('dev.index', $in))->assertSessionHas('err');
+    ($this->as)($this->dev)->get(route($scope.'.export', $in))->assertRedirect(route($scope.'.index', $in))->assertSessionHas('err');
+})->with(['dev', 'test']);
+
+it('shows the latest test handoff in the list, Excel and each historical close round', function ($from) {
+    $pid = $this->p->id;
+    $svc = app(IssueService::class);
+    $close = app(IssueCloseService::class);
+    $both = ieUser('both', 'internal', ['internal_pm', 'dev'], $this->p);
+    $issue = ieIssue($both, $this->p, 'pm', ['status' => $from, 'assignee_dev_id' => $both->id]);
+    $in = ['q' => $issue->issue_no];
+    $check = function ($tab, $time, $source) use ($in) {
+        $params = $in + ['tab' => $tab];
+        ($this->as)($this->tester)->get(route('test.index', $params))->assertOk()
+            ->assertSeeInOrder(['測試派工時間', '派工來源', $time, $source]);
+        $file = ($this->as)($this->tester)->get(route('test.export', $params))->assertOk();
+        expect(ieText(ieXml($file, 'xl/worksheets/sheet1.xml')))->toContain('測試派工時間', '派工來源', $time, $source);
+    };
+    $this->travelTo(now('UTC')->setDateTime(2026, 10, 4, 19, 15));
+    $svc->transition($both, $issue->id, $pid, 'test_pending', ['assignee_test_id' => $this->tester->id]);
+    $check('active', '2026-10-05 03:15', 'PM');
+
+    // The first request, withdrawal, re-dispatch and second request share a timestamp.
+    $this->travelTo(now()->addMinutes(5));
+    $close->request($both, $pid, $issue->id, 'closed_pm', '第一輪', null);
+    $close->withdraw($both, $pid, $issue->id);
+    $svc->transition($this->tester, $issue->id, $pid, 'test_scheduled', ['test_scheduled_at' => '2026-10-06']);
+    $svc->transition($this->tester, $issue->id, $pid, 'test_doing');
+    $svc->transition($this->tester, $issue->id, $pid, 'test_failed');
+    $check('bounced', '2026-10-05 03:15', 'PM');
+    $svc->transition($both, $issue->id, $pid, 'dev_doing');
+    $svc->transition($both, $issue->id, $pid, 'test_pending', [], '第二次送測');
+    $check('active', '2026-10-05 03:20', '開發');
+    $close->request($both, $pid, $issue->id, 'closed_pm', '第二輪', null);
+    $check('close', '2026-10-05 03:20', '開發');
+
+    $params = $in + ['tab' => 'close', 'status' => 'all'];
+    $page = ($this->as)($this->tester)->get(route('test.index', $params))->assertOk();
+    $page->assertSeeInOrder(['測試派工時間', '2026-10-05 03:15', 'PM', '已撤回', '2026-10-05 03:20', '開發']);
+    $rows = $page->viewData('rounds')->items();
+    expect(array_column($rows, 'dispatch_source', 'round'))->toBe([1 => 'PM', 2 => '開發']);
+    $file = ($this->as)($this->tester)->get(route('test.export', $params))->assertOk();
+    expect(ieText(ieXml($file, 'xl/worksheets/sheet1.xml')))->toContain("2026-10-05 03:15\nPM", "2026-10-05 03:20\n開發");
+})->with(['new', 'discussing']);
+
+it('tracks package handoffs per issue and retains the last handoff across withdrawal', function () {
+    $pid = $this->p->id;
+    $svc = app(IssueService::class);
+    $ids = [];
+    foreach (['甲', '乙'] as $title) {
+        $ids[] = ieIssue($this->dev, $this->p, 'dev', ['title' => $title, 'status' => 'dev_doing', 'assignee_dev_id' => $this->dev->id])->id;
+    }
+    $pkg = $svc->createPackage($this->dev, $pid, '批次送測');
+    $this->travelTo(now('UTC')->setDateTime(2026, 11, 2, 4, 30));
+    $svc->addToPackage($this->dev, $pid, $pkg, $ids, $this->tester->id);
+    $this->travelTo(now()->addDay());
+    $svc->removeFromPackage($this->dev, $pid, $pkg, $ids[0]);
+    $close = app(IssueCloseService::class);
+    $close->request($this->pm, $pid, $ids[0], 'closed_pm', '撤回後送結案', null);
+    $row = $this->svc->testBook($this->tester, $pid, ['tab' => 'close'])->sheets[0]->rows[0];
+    expect($row)->toMatchArray(['dispatched_at' => '2026-11-02 12:30', 'dispatch_source' => '開發']);
+    $close->withdraw($this->pm, $pid, $ids[0]);
+    $svc->addToPackage($this->dev, $pid, $pkg, [$ids[0]], null);
+    $sheet = $this->svc->testBook($this->tester, $pid, ['mine' => 1])->sheets[0];
+    $dates = array_column($sheet->rows, 'dispatched_at', 'title');
+    expect($dates['甲'])->toBe('2026-11-03 12:30')->and($dates['乙'])->toBe('2026-11-02 12:30');
+});
+
+it('keeps a pre-handoff round blank after a later same-second dispatch', function () {
+    $this->freezeTime();
+    $pid = $this->p->id;
+    $svc = app(IssueService::class);
+    $close = app(IssueCloseService::class);
+    $issue = ieIssue($this->dev, $this->p, 'dev', ['status' => 'dev_doing', 'assignee_dev_id' => $this->dev->id]);
+    $close->request($this->pm, $pid, $issue->id, 'closed_pm', '尚未送測', null);
+    $close->withdraw($this->pm, $pid, $issue->id);
+    $svc->transition($this->dev, $issue->id, $pid, 'test_pending', ['assignee_test_id' => $this->tester->id], '首次送測');
+    $close->request($this->pm, $pid, $issue->id, 'closed_pm', '送測後結案', null);
+    $tasks = $issue->closeTasks()->where('round', 2)->get()->keyBy('role');
+    $close->finishTask($this->dev, $pid, $tasks['dev']->id, '開發已確認');
+    $mine = ['tab' => 'close', 'mine' => 1];
+    $page = ($this->as)($this->tester)->get(route('test.index', $mine))->assertOk();
+    expect($page->viewData('rounds')->getCollection()->sole())->toMatchArray(['round' => 2, 'progress' => '1／2', 'dispatch_source' => '開發']);
+    $close->finishTask($this->tester, $pid, $tasks['test']->id, '測試已確認');
+    $history = $this->svc->testBook($this->tester, $pid, ['tab' => 'close', 'status' => 'all'])->sheets[0]->rows;
+    expect($history[0])->toMatchArray(['round' => 1, 'status' => '已撤回', 'dispatched_at' => '—', 'dispatch_source' => '—']);
+    expect($history[1])->toMatchArray(['round' => 2, 'status' => '已完成', 'progress' => '2／2', 'dispatched_at' => tw(now()), 'dispatch_source' => '開發']);
+    expect($this->svc->testBook($this->tester, $pid, $mine)->sheets[0]->rows)->toBeEmpty();
+});
+
+it('leaves test dispatch blank for new findings and legacy issues without matching project events', function () {
+    $found = ieIssue($this->tester, $this->p, 'test', ['assignee_dev_id' => $this->dev->id]);
+    $legacy = ieIssue($this->pm, $this->p, 'pm', ['status' => 'test_pending', 'assignee_test_id' => $this->tester->id]);
+    $other = Project::create(['code' => 'ELSE', 'name' => 'ELSE', 'ticket_prefix' => 'ELSE']);
+    foreach ([[$other->id, 'issue', 'status'], [$this->p->id, 'ticket', 'status'], [$this->p->id, 'issue', 'close_withdrawn']] as [$project, $subject, $type]) {
+        ActivityEvent::create(['project_id' => $project, 'subject_type' => $subject, 'subject_id' => $legacy->id, 'event_type' => $type,
+            'from_status' => 'new', 'to_status' => 'test_pending', 'actor_id' => $this->pm->id]);
+    }
+    foreach (['active' => $legacy, 'bounced' => $found] as $tab => $issue) {
+        $params = ['tab' => $tab, 'q' => $issue->issue_no];
+        $page = ($this->as)($this->tester)->get(route('test.index', $params))->assertOk();
+        expect($page->viewData('testDispatches'))->toBeEmpty();
+        $row = $this->svc->testBook($this->tester, $this->p->id, $params)->sheets[0]->rows[0];
+        expect($row)->toMatchArray(['issue_no' => $issue->issue_no, 'dispatched_at' => '—', 'dispatch_source' => '—']);
+    }
 });
 
 it('computes overdue days in Taipei time for non-terminal issues only', function () {

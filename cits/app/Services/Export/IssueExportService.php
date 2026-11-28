@@ -8,6 +8,8 @@ use App\Repositories\IssueExportRepository;
 use App\Repositories\IssueRepository;
 use App\Repositories\ProjectRepository;
 use App\Services\Dev\DevService;
+use App\Services\IssueCloseListService;
+use App\Services\IssueDispatchService;
 use App\Services\Pm\PmQueryService;
 use App\Services\Test\TestService;
 use App\Services\WorkflowService;
@@ -19,8 +21,6 @@ class IssueExportService
 {
     private const TZ = 'Asia/Taipei';
 
-    private const TEST_TABS = ['active' => '測試與上線', 'bounced' => '已退回/新發現'];
-
     public function __construct(
         private IssueRepository $issues,
         private IssueExportRepository $exportRepo,
@@ -30,6 +30,8 @@ class IssueExportService
         private XlsxExportService $xlsx,
         private DevService $dev,
         private TestService $test,
+        private IssueDispatchService $dispatch,
+        private IssueCloseListService $closeList,
         private PmQueryService $pm,
     ) {}
 
@@ -62,19 +64,7 @@ class IssueExportService
         $fl = $this->dev->filters($u, $projectId, $in);
         $info = ['頁籤' => DevService::TABS[$fl['tab']]];
         if ($fl['tab'] === 'close') {
-            $rows = $this->dev->closeRounds($u, $projectId, $fl, $this->xlsx->maxRows() + 1);
-            $this->xlsx->assertWithinLimit($rows->count());
-            $sheet = new ExportSheet($info['頁籤'], DevService::CLOSE_COLUMNS, $rows->map(function ($row) {
-                $row['issue_no'] = new ExportLink($row['issue_no'], route('issues.show', $row['issue_id']).'#close-tasks');
-                unset($row['issue_id']);
-
-                return $row;
-            })->all());
-            $info['收尾狀態'] = $this->dev->closeStatuses()[$fl['status']];
-            $info['關鍵字'] = $fl['q'] !== '' ? $fl['q'] : '無';
-            $info['只看我待確認'] = $fl['mine'] ? '是' : '否';
-
-            return $this->book('dev_issues', $projectId, $sheet->name, $sheet, $info);
+            return $this->closeBook($u, $projectId, $fl, testing: false);
         }
         if ($fl['tab'] === 'schedule') {
             $groups = $this->dev->scheduleGroups($this->dev->scheduleIssues($u, $projectId, $fl['mine']));
@@ -105,15 +95,36 @@ class IssueExportService
     public function testBook(User $u, int $projectId, array $in): ExportBook
     {
         $fl = $this->test->filters($u, $projectId, $in);
+        if ($fl['tab'] === 'close') {
+            return $this->closeBook($u, $projectId, $fl, testing: true);
+        }
         $sheet = $this->issueSheet('test_issues', $projectId, $fl['f'], '測試問題');
         $info = [
-            '頁籤' => self::TEST_TABS[$fl['tab']],
+            '頁籤' => TestService::TABS[$fl['tab']],
             '狀態' => $fl['status'] ? $this->wf->label('issue', $fl['status']) : '全部',
             '關鍵字' => $fl['q'] !== '' ? $fl['q'] : '無',
             '只看我的' => $fl['mine'] ? '是' : '否',
         ];
 
         return $this->book('test_issues', $projectId, '測試問題', $sheet, $info);
+    }
+
+    private function closeBook(User $u, int $projectId, array $fl, bool $testing): ExportBook
+    {
+        $rows = $this->closeList->rows($u, $projectId, $fl, $testing, $this->xlsx->maxRows() + 1);
+        $this->xlsx->assertWithinLimit($rows->count());
+        $sheet = new ExportSheet('結案收尾', $this->closeList->columns($testing), $rows->map(function ($row) {
+            $row['issue_no'] = new ExportLink($row['issue_no'], route('issues.show', $row['issue_id']).'#close-tasks');
+            unset($row['issue_id']);
+
+            return $row;
+        })->all());
+        $info['頁籤'] = $sheet->name;
+        $info['收尾狀態'] = $this->closeList->statuses()[$fl['status']];
+        $info['關鍵字'] = $fl['q'] !== '' ? $fl['q'] : '無';
+        $info['只看我待確認'] = $fl['mine'] ? '是' : '否';
+
+        return $this->book($testing ? 'test_issues' : 'dev_issues', $projectId, $sheet->name, $sheet, $info);
     }
 
     /** @param array<string,string> $info */
@@ -159,9 +170,15 @@ class IssueExportService
 
         $cols = $this->columns->columns($listKey, array_keys($resolvers));
         if ($listKey === 'dev_issues') {
-            $times = $this->dev->dispatchTimes($projectId, $issues->pluck('id')->all());
-            $cols['dispatched_at'] = DevService::DISPATCH_LABEL;
+            $times = $this->dispatch->devTimes($projectId, $issues->pluck('id')->all());
+            $cols['dispatched_at'] = IssueDispatchService::DEV_LABEL;
             $resolvers['dispatched_at'] = fn (Issue $i) => $times[$i->id] ?? '—';
+        } elseif ($listKey === 'test_issues') {
+            $dispatches = $this->dispatch->test($projectId, $issues->pluck('id')->all());
+            $cols += IssueDispatchService::TEST_COLUMNS;
+            foreach (IssueDispatchService::TEST_COLUMNS as $key => $label) {
+                $resolvers[$key] = fn (Issue $i) => $dispatches[$i->id][$key] ?? '—';
+            }
         }
         $rows = [];
         foreach ($issues as $i) {

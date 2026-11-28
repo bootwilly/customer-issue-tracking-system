@@ -59,7 +59,7 @@
             <div class="overflow-x-auto rounded-lg bg-white shadow-sm">
                 <table class="min-w-full divide-y divide-slate-200 text-sm">
                     <thead class="bg-slate-50 text-left text-xs text-slate-500"><tr>
-                        @foreach (['預計完工日', '單號', '標題', '狀態', 'DEV', \App\Services\Dev\DevService::DISPATCH_LABEL] as $heading)
+                        @foreach (['預計完工日', '單號', '標題', '狀態', 'DEV', \App\Services\IssueDispatchService::DEV_LABEL] as $heading)
                             <th class="px-3 py-2">{{ $heading }}</th>
                         @endforeach
                     </tr></thead>

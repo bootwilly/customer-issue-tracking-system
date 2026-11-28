@@ -82,7 +82,7 @@ class IssueCloseRepository
             ->join('events as e', fn ($j) => $j->on('e.subject_id', '=', 'r.issue_id')
                 ->on('e.payload->round', '=', 'r.round')->where('e.project_id', $projectId)
                 ->where('e.subject_type', 'issue')->where('e.event_type', 'close_requested'))
-            ->select('r.*', 'e.payload->target as target', 'e.created_at as requested_at')
+            ->select('r.*', 'e.id as request_event_id', 'e.payload->target as target', 'e.created_at as requested_at')
             ->when($status !== null, fn ($q) => $q->where('r.round_status', $status))
             ->orderBy('e.created_at')->orderBy('e.id');
         if ($mine !== null) {

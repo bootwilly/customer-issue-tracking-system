@@ -30,6 +30,62 @@ class EventRepository
             ->pluck('dispatched_at', 'subject_id');
     }
 
+    /** Keyed by issue ID for current lists, or by close_requested event ID for historical rounds. */
+    public function latestTestDispatches(int $projectId, array $ids, array $testStatuses, array $permissions, bool $atClose): Collection
+    {
+        if (! $ids) {
+            return collect();
+        }
+        $sources = $this->testHandoffPermissions($testStatuses, $permissions);
+        if (! $sources) {
+            return collect();
+        }
+
+        $anchors = DB::table($atClose ? 'events as a' : 'issues as a')
+            ->where('a.project_id', $projectId)->whereIntegerInRaw('a.id', $ids)->select('a.id');
+        $last = DB::table('events as sent')->select('sent.id')
+            ->whereColumn('sent.project_id', 'a.project_id')
+            ->whereColumn('sent.subject_id', $atClose ? 'a.subject_id' : 'a.id')
+            ->where(['sent.subject_type' => 'issue', 'sent.event_type' => 'status'])
+            ->where(function ($pairs) use ($sources) {
+                foreach ($sources as $from => $targets) {
+                    $pairs->orWhere(fn ($pair) => $pair->where('sent.from_status', $from)->whereIn('sent.to_status', array_keys($targets)));
+                }
+            })->orderByDesc('sent.created_at')->orderByDesc('sent.id')->limit(1);
+        if ($atClose) {
+            $anchors->where(['a.subject_type' => 'issue', 'a.event_type' => 'close_requested']);
+            // The event ID orders a withdrawal, re-dispatch and new request within the same second.
+            $last->where(fn ($q) => $q->whereColumn('sent.created_at', '<', 'a.created_at')->orWhere(fn ($tie) => $tie
+                ->whereColumn('sent.created_at', 'a.created_at')->whereColumn('sent.id', '<', 'a.id')));
+        }
+
+        return DB::query()->fromSub($anchors->selectSub($last, 'dispatch_id'), 'matches')
+            ->join('events as e', 'e.id', '=', 'matches.dispatch_id')
+            ->get(['matches.id', 'e.created_at', 'e.from_status', 'e.to_status'])
+            ->mapWithKeys(fn ($e) => [$e->id => ['dispatched_at' => $e->created_at, 'permission' => $sources[$e->from_status][$e->to_status]]]);
+    }
+
+    /** Index configured handoffs by their exact from/to pair, including composite workflow permissions. */
+    private function testHandoffPermissions(array $testStatuses, array $permissions): array
+    {
+        $sources = [];
+        $transitions = WorkflowTransition::where('scope', 'issue')->whereIn('to_code', $testStatuses)
+            ->get(['from_code', 'to_code', 'permission', 'requires_fields']);
+        foreach ($transitions as $transition) {
+            if (! in_array('assignee_test_id', $transition->requires_fields ?? [], true)) {
+                continue;
+            }
+            foreach ($permissions as $permission) {
+                if (in_array($permission, explode('|', $transition->permission), true)) {
+                    $sources[$transition->from_code][$transition->to_code] = $permission;
+                    break;
+                }
+            }
+        }
+
+        return $sources;
+    }
+
     public function log(int $projectId, string $subjectType, int $subjectId, string $type, ?string $from, ?string $to, int $actorId, array $payload = []): ActivityEvent
     {
         return ActivityEvent::create([
