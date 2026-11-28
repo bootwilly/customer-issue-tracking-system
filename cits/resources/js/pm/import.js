@@ -73,6 +73,7 @@ $('[data-preview]').addEventListener('click', async () => {
         fileId = (await uploadWorkbook(file)).attachment_id;
         status('解析中…');
         data = await api(root.dataset.previewUrl, { json: { file_id: fileId, source } });
+        $('[data-provenance]').value = '';
         render();
         status(`解析完成：共 ${data.rows.length} 列。`);
     } catch (e) {
@@ -176,6 +177,8 @@ $('[data-apply]').addEventListener('click', async () => {
     if (!picked.length) return status('請勾選要匯入的列。', true);
     const nNew = picked.filter((tr) => data.rows[tr.dataset.i].state === 'new').length;
     const nAdd = picked.length - nNew;
+    const provenance = $('[data-provenance]').value;
+    if (nNew && !provenance) return status('請選擇本批新單的問題出處。', true);
     if (!confirm(`將建立 ${nNew} 張內部單${nAdd ? `、新增 ${nAdd} 筆補充說明` : ''}。建立後無法刪除，只能取消。確定？`)) return;
     $('[data-apply]').disabled = true;
     try {
@@ -198,7 +201,7 @@ $('[data-apply]').addEventListener('click', async () => {
             rows.push(row);
         }
         status('建立中…');
-        const res = await api(root.dataset.applyUrl, { json: { file_id: fileId, source: data.source, rows } });
+        const res = await api(root.dataset.applyUrl, { json: { file_id: fileId, source: data.source, provenance: provenance || null, rows } });
         const box = $('[data-result]');
         box.innerHTML = `<p class="mb-2 font-medium">完成：${res.done.filter((d) => d.action === 'create').length} 張內部單已建立${res.done.some((d) => d.action === 'addendum') ? `，${res.done.filter((d) => d.action === 'addendum').length} 筆補充說明` : ''}。</p>
             <ul class="grid gap-1 md:grid-cols-3">${res.done.map((d) => `<li>#${esc(d.no)} → <a class="text-indigo-700 hover:underline" target="_blank" href="${esc(d.url)}">${esc(d.issue_no)}</a>${d.action === 'addendum' ? '（補充說明）' : ''}</li>`).join('')}</ul>`;

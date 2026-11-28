@@ -29,6 +29,7 @@ class PmIssueImportController extends Controller
         $this->allowed($request);
 
         return view('pm.issue-import', [
+            'provenances' => $import->provenanceOptions(),
             'sources' => $import->sources($this->pid()),
             'fileContext' => IssueImportService::FILE_CONTEXT,
         ]);
@@ -77,6 +78,7 @@ class PmIssueImportController extends Controller
         $d = $request->validate([
             'file_id' => 'required|integer',
             'source' => 'required|string|max:50',
+            'provenance' => 'nullable|string|max:30',
             'rows' => 'required|array|min:1|max:1000',
             'rows.*.no' => 'required|string|max:30',
             'rows.*.action' => 'required|in:create,addendum',
@@ -87,7 +89,7 @@ class PmIssueImportController extends Controller
         ]);
 
         return $this->json(function () use ($import, $u, $d) {
-            $done = $import->apply($u, $this->pid(), (int) $d['file_id'], $d['source'], $d['rows']);
+            $done = $import->apply($u, $this->pid(), (int) $d['file_id'], $d['source'], $d['rows'], $d['provenance'] ?? null);
 
             return ['done' => array_map(fn ($r) => $r + ['url' => route('issues.show', $r['issue_id'])], $done)];
         });

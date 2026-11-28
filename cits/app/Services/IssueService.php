@@ -140,7 +140,7 @@ class IssueService
                     throw new BusinessException("{$t->ticket_no} 尚未接收或已結束，不能建立內部單。");
                 }
             }
-            $issue = $this->createRow($u, $projectId, $this->wf->lookupCodes('issue_origin_external')[0] ?? throw new BusinessException('缺少設定：issue_origin_external'), $d, $draft);
+            $issue = $this->createRow($u, $projectId, $this->wf->lookupCodes('issue_origin_external')[0] ?? throw new BusinessException('缺少設定：issue_origin_external'), $d, $draft, $tickets->pluck('ticket_no', 'id')->all());
             foreach ($tickets as $t) {
                 $this->tickets->link($t->id, $issue->id, $t->current_rev, $u->id);
                 $this->tickets->save($t, ['needs_pm_action' => false]);
@@ -164,7 +164,7 @@ class IssueService
         return $this->uow->run(fn () => $this->createRow($u, $projectId, $origin, $d, $draft));
     }
 
-    private function createRow(User $u, int $projectId, string $origin, array $d, ?string $draft): Issue
+    private function createRow(User $u, int $projectId, string $origin, array $d, ?string $draft, array $sourceTickets = []): Issue
     {
         $html = $this->content->clean($d['content_html'] ?? '');
         if ($this->content->isBlank($html) || trim((string) ($d['title'] ?? '')) === '') {
@@ -191,7 +191,7 @@ class IssueService
             'rework_count' => 0,
             'created_by' => $u->id,
         ]);
-        $this->events->log($projectId, 'issue', $issue->id, 'created', null, $status, $u->id, ['origin' => $origin]);
+        $this->events->log($projectId, 'issue', $issue->id, 'created', null, $status, $u->id, ['origin' => $origin] + ($sourceTickets ? ['tickets' => $sourceTickets] : []));
         $this->content->bind($html, 'issue', $issue->id, $draft);
         $this->content->clearDraft($u->id, $draft);
         $this->watch->autoWatchIssue($issue, [$u->id, $issue->assignee_dev_id, $issue->assignee_test_id]);

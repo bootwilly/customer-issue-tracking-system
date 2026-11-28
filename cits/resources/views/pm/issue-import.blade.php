@@ -46,6 +46,12 @@
             <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
                 <div data-counts class="flex flex-wrap gap-2 text-sm"></div>
                 <div class="flex items-center gap-3">
+                    <label class="text-sm">本批新單出處
+                        <select data-provenance class="{{ $input }}">
+                            <option value="">請選擇</option>
+                            @foreach ($provenances as $code => $label)<option value="{{ $code }}">{{ $label }}</option>@endforeach
+                        </select>
+                    </label>
                     <label class="text-sm"><input data-toggle-all type="checkbox" checked> 全選新建列</label>
                     <button data-apply type="button" class="rounded-md bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50">確認匯入</button>
                 </div>

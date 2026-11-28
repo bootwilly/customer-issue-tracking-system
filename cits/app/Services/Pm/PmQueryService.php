@@ -23,6 +23,11 @@ use App\Services\WorkflowService;
 /** Read-side orchestration for the PM board, client-ticket view and shared issue detail. */
 class PmQueryService
 {
+    public const SORT_OPTIONS = [
+        'created' => '建立時間', 'last' => '最後更新', 'severity' => '嚴重度（高→低）', 'severity_asc' => '嚴重度（低→高）',
+        'status' => '狀態（流程順序）', 'status_desc' => '狀態（流程反序）', 'due' => '預計完工',
+    ];
+
     public function __construct(
         private PmQueryRepository $repo,
         private IssueRepository $issues,
@@ -39,6 +44,7 @@ class PmQueryService
         private IssueTrashService $trash,
         private IssueCloseListService $closeList,
         private IssueDispatchService $dispatch,
+        private IssueProvenanceService $provenance,
     ) {}
 
     /** @param array{only_action?:bool,tq?:string,ni?:string,stage?:string,status?:string,origin?:string,q?:string,sort?:string,tags?:array} $f */
@@ -69,10 +75,15 @@ class PmQueryService
             return $common + ['closeFilters' => $filters] + $this->closeList->page($u, $projectId, $filters, IssueCloseListService::PM);
         }
         $issueStatuses = $this->wf->statusMap('issue');
-        $issues = $this->issues->paginate($projectId, $this->issueFilters($f));
+        $filters = $this->issueFilters($f);
+        $issues = $this->issues->paginate($projectId, $filters);
         $issueIds = $issues->getCollection()->pluck('id')->all();
 
         return $common + [
+            'sourceCounts' => $this->issues->provenanceCounts($projectId, $filters),
+            'sourceOptions' => $this->wf->lookupMapAll('issue_provenance'),
+            'sources' => $this->provenance->details($projectId, $issues->getCollection(), $this->meetings->canView($u, $projectId)),
+            'sortOptions' => self::SORT_OPTIONS,
             'timeline' => $this->dispatch->pmTimeline($projectId, $issues->getCollection()),
             'issues' => $issues,
             'issueTags' => $this->tags->ofMany($issueIds),
@@ -83,7 +94,6 @@ class PmQueryService
             'statuses' => $issueStatuses->values(),
             'origins' => $this->wf->lookups('issue_initial')->pluck('code'),
             'originLabels' => $this->wf->lookupMap('issue_origin'),
-            'externalOrigins' => $this->wf->lookupCodes('issue_origin_external'),
         ];
     }
 
@@ -110,8 +120,12 @@ class PmQueryService
             'origin' => $origin !== '' ? $origin : null,
             'q' => $f['q'] ?? null,
             'tags' => $this->tags->filterCodes($f['tags'] ?? null),
-            'sort' => $sort,
-            'dir' => $sort === 'due' ? 'asc' : 'desc',
+            'externalOrigins' => $this->wf->lookupCodes('issue_origin_external'),
+            'provenance' => $f['provenance'] ?? null,
+            'sort' => match ($sort) {
+                'severity_asc' => 'severity', 'status_desc' => 'status', default => $sort
+            },
+            'dir' => in_array($sort, ['due', 'severity_asc', 'status'], true) ? 'asc' : 'desc',
         ];
     }
 

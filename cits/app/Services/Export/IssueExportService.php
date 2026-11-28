@@ -10,6 +10,7 @@ use App\Repositories\ProjectRepository;
 use App\Services\Dev\DevService;
 use App\Services\IssueCloseListService;
 use App\Services\IssueDispatchService;
+use App\Services\Pm\IssueProvenanceService;
 use App\Services\Pm\PmQueryService;
 use App\Services\Test\TestService;
 use App\Services\WorkflowService;
@@ -33,6 +34,7 @@ class IssueExportService
         private IssueDispatchService $dispatch,
         private IssueCloseListService $closeList,
         private PmQueryService $pm,
+        private IssueProvenanceService $provenance,
     ) {}
 
     public function canExport(User $u, int $projectId): bool
@@ -45,12 +47,15 @@ class IssueExportService
      * @param  array  $f  the exact filter array passed to IssueRepository::paginate
      * @param  (callable(Issue):?string)|null  $weekOf
      */
-    public function issueSheet(string $listKey, int $projectId, array $f, string $sheetName = '內部單', ?callable $weekOf = null): ExportSheet
+    public function issueSheet(string $listKey, int $projectId, array $f, string $sheetName = '內部單', ?callable $weekOf = null, bool $canViewMeetings = false): ExportSheet
     {
+        if ($listKey === 'pm_issues') {
+            $f['externalOrigins'] = $this->wf->lookupCodes('issue_origin_external');
+        }
         $rows = $this->issues->listFiltered($projectId, $f, $this->xlsx->maxRows() + 1);
         $this->xlsx->assertWithinLimit($rows->count());
 
-        return $this->buildSheet($projectId, $listKey, $sheetName, $rows, $weekOf);
+        return $this->buildSheet($projectId, $listKey, $sheetName, $rows, $weekOf, $canViewMeetings);
     }
 
     /** PM issue list: $f = PmController::index validated filters (stage,status,origin,q,sort). */
@@ -60,7 +65,7 @@ class IssueExportService
             return $this->closeSheet($u, $projectId, $this->pm->closeFilters($f), IssueCloseListService::PM);
         }
 
-        return $this->issueSheet('pm_issues', $projectId, $this->pm->issueFilters($f));
+        return $this->issueSheet('pm_issues', $projectId, $this->pm->issueFilters($f), canViewMeetings: $this->wf->can($u, 'meeting.view', $projectId));
     }
 
     public function devBook(User $u, int $projectId, array $in): ExportBook
@@ -152,7 +157,7 @@ class IssueExportService
     }
 
     /** @param Collection<int,Issue> $issues */
-    private function buildSheet(int $projectId, string $listKey, string $sheetName, Collection $issues, ?callable $weekOf): ExportSheet
+    private function buildSheet(int $projectId, string $listKey, string $sheetName, Collection $issues, ?callable $weekOf, bool $canViewMeetings = false): ExportSheet
     {
         $today = CarbonImmutable::now(self::TZ)->startOfDay();
         $statusMap = $this->wf->statusMap('issue');
@@ -186,6 +191,15 @@ class IssueExportService
 
         $cols = $this->columns->columns($listKey, array_keys($resolvers));
         if ($listKey === 'pm_issues') {
+            $sources = $this->provenance->details($projectId, $issues, $canViewMeetings);
+            $cols = array_replace($cols, ['origin' => '問題出處', 'source_detail' => '來源明細']);
+            $resolvers['origin'] = fn (Issue $i) => $sources[$i->id]['label'];
+            $resolvers['source_detail'] = function (Issue $i) use ($sources) {
+                $source = $sources[$i->id];
+                $detail = $source['detail'].($source['in_meeting'] ? '（已排入會議）' : '');
+
+                return $source['url'] ? new ExportLink($detail, $source['url']) : $detail;
+            };
             $timeline = $this->dispatch->pmTimeline($projectId, $issues);
             $cols = array_replace($cols, IssueDispatchService::PM_COLUMNS);
             foreach (IssueDispatchService::PM_COLUMNS as $key => $label) {

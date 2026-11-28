@@ -180,7 +180,7 @@ it('creates issues in one go, binds the pictures and never imports the same line
     $img = ($this->picture)($this->pm, $file, '1');
     $draw = ($this->picture)($this->pm, $file, '1');
 
-    $res = ($this->as)($this->pm)->postJson('/pm/issues/import/apply', ['file_id' => $file, 'source' => 'YC-MES', 'rows' => [
+    $res = ($this->as)($this->pm)->postJson('/pm/issues/import/apply', ['provenance' => 'meeting', 'file_id' => $file, 'source' => 'YC-MES', 'rows' => [
         ['no' => '1', 'action' => 'create', 'images' => [$img, $draw], 'process_type' => 'feature', 'mes_page_id' => $this->page->id],
         ['no' => '4', 'action' => 'create', 'images' => []],
     ]])->assertOk()->json('done');
@@ -198,7 +198,7 @@ it('creates issues in one go, binds the pictures and never imports the same line
     $again = ($this->as)($this->pm)->postJson('/pm/issues/import/preview', ['file_id' => $file, 'source' => 'YC-MES'])->json('rows');
     expect(collect($again)->keyBy('no')['1']['state'])->toBe('same')
         ->and(collect($again)->keyBy('no')['1']['existing']['issue_no'])->toBe($i->issue_no);
-    ($this->as)($this->pm)->postJson('/pm/issues/import/apply', ['file_id' => $file, 'source' => 'YC-MES', 'rows' => [['no' => '4', 'action' => 'create', 'images' => []]]])
+    ($this->as)($this->pm)->postJson('/pm/issues/import/apply', ['provenance' => 'meeting', 'file_id' => $file, 'source' => 'YC-MES', 'rows' => [['no' => '4', 'action' => 'create', 'images' => []]]])
         ->assertStatus(422);
     expect(Issue::count())->toBe(2);
 
@@ -210,7 +210,7 @@ it('refuses pictures of another row, a wrong picture count and skipped or broken
     $file = ($this->upload)($this->pm, impWorkbook($this->rows, true));
     $foreign = ($this->picture)($this->pm, $file, '4');
     $own = ($this->picture)($this->pm, $file, '1');
-    $apply = fn (array $rows) => ($this->as)($this->pm)->postJson('/pm/issues/import/apply', ['file_id' => $file, 'source' => 'S', 'rows' => $rows]);
+    $apply = fn (array $rows) => ($this->as)($this->pm)->postJson('/pm/issues/import/apply', ['provenance' => 'meeting', 'file_id' => $file, 'source' => 'S', 'rows' => $rows]);
 
     $apply([['no' => '1', 'action' => 'create', 'images' => [$own, $foreign]]])->assertStatus(422);
     $apply([['no' => '1', 'action' => 'create', 'images' => [$own]]])->assertStatus(422)->assertJsonPath('message', '序號 1 的圖片數量不符，請重新預覽。');
@@ -223,7 +223,7 @@ it('refuses pictures of another row, a wrong picture count and skipped or broken
 
 it('turns a changed line of an imported row into an addendum', function () {
     $file = ($this->upload)($this->pm, impWorkbook([$this->rows[3]]));
-    ($this->as)($this->pm)->postJson('/pm/issues/import/apply', ['file_id' => $file, 'source' => 'S', 'rows' => [['no' => '4', 'action' => 'create', 'images' => []]]])->assertOk();
+    ($this->as)($this->pm)->postJson('/pm/issues/import/apply', ['provenance' => 'meeting', 'file_id' => $file, 'source' => 'S', 'rows' => [['no' => '4', 'action' => 'create', 'images' => []]]])->assertOk();
 
     $edited = $this->rows[3];
     $edited['content'] .= "\n20260801 補充：改為每日排程";
@@ -231,16 +231,17 @@ it('turns a changed line of an imported row into an addendum', function () {
     $row = ($this->as)($this->pm)->postJson('/pm/issues/import/preview', ['file_id' => $file2, 'source' => 'S'])->json('rows.0');
     expect($row['state'])->toBe('changed');
 
-    ($this->as)($this->pm)->postJson('/pm/issues/import/apply', ['file_id' => $file2, 'source' => 'S', 'rows' => [['no' => '4', 'action' => 'create', 'images' => []]]])->assertStatus(422);
-    ($this->as)($this->pm)->postJson('/pm/issues/import/apply', ['file_id' => $file2, 'source' => 'S', 'rows' => [['no' => '4', 'action' => 'addendum', 'images' => []]]])->assertOk();
+    ($this->as)($this->pm)->postJson('/pm/issues/import/apply', ['provenance' => 'internal', 'file_id' => $file2, 'source' => 'S', 'rows' => [['no' => '4', 'action' => 'create', 'images' => []]]])->assertStatus(422);
+    ($this->as)($this->pm)->postJson('/pm/issues/import/apply', ['provenance' => 'internal', 'file_id' => $file2, 'source' => 'S', 'rows' => [['no' => '4', 'action' => 'addendum', 'images' => []]]])->assertOk();
     expect(Issue::count())->toBe(1)
         ->and(IssueAddendum::first()->content_html)->toContain('改為每日排程')
         ->and(($this->as)($this->pm)->postJson('/pm/issues/import/preview', ['file_id' => $file2, 'source' => 'S'])->json('rows.0.state'))->toBe('same');
+    ($this->as)($this->pm)->get(route('pm.index', ['provenance' => 'meeting']))->assertOk()->assertSee('Excel S #4');
 });
 
 it('blocks a line whose issue is in the recycle bin and imports it again after a permanent delete', function () {
     $file = ($this->upload)($this->pm, impWorkbook([$this->rows[3]]));
-    $id = ($this->as)($this->pm)->postJson('/pm/issues/import/apply', ['file_id' => $file, 'source' => 'S', 'rows' => [['no' => '4', 'action' => 'create', 'images' => []]]])
+    $id = ($this->as)($this->pm)->postJson('/pm/issues/import/apply', ['provenance' => 'meeting', 'file_id' => $file, 'source' => 'S', 'rows' => [['no' => '4', 'action' => 'create', 'images' => []]]])
         ->assertOk()->json('done.0.issue_id');
     ($this->as)($this->pm)->delete(route('issues.destroy', $id))->assertSessionHas('ok');
 
@@ -251,6 +252,18 @@ it('blocks a line whose issue is in the recycle bin and imports it again after a
     $no = Issue::withTrashed()->find($id)->issue_no;
     ($this->as)($adm)->delete(route('padmin.trash.issues.purge', $id), ['confirm_no' => $no])->assertSessionHas('ok');
     expect(($this->as)($this->pm)->postJson('/pm/issues/import/preview', ['file_id' => $file, 'source' => 'S'])->json('rows.0.state'))->toBe('new');
+});
+
+it('requires one valid batch provenance for newly imported issues', function () {
+    $file = ($this->upload)($this->pm, impWorkbook($this->rows));
+    $pm = ($this->as)($this->pm);
+    $input = ['file_id' => $file, 'source' => '來源A', 'rows' => [['no' => '4', 'action' => 'create', 'images' => []]]];
+    foreach ([null, 'unknown_import', 'invalid'] as $choice) {
+        $pm->postJson('/pm/issues/import/apply', $input + ['provenance' => $choice])->assertUnprocessable();
+    }
+    $issueId = $pm->postJson('/pm/issues/import/apply', $input + ['provenance' => 'meeting'])->assertOk()->json('done.0.issue_id');
+    $pm->get(route('pm.index', ['provenance' => 'meeting']))->assertOk()->assertSee('Excel 來源A #4');
+    expect(IssueImportRow::where('issue_id', $issueId)->count())->toBe(1);
 });
 
 it('accepts only the standard template', function () {

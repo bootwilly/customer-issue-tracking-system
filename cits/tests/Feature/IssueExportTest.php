@@ -8,6 +8,7 @@ use App\Models\LookupItem;
 use App\Models\Meeting;
 use App\Models\Project;
 use App\Models\User;
+use App\Models\WorkflowStatus;
 use App\Repositories\EventRepository;
 use App\Repositories\IssueRepository;
 use App\Repositories\SettingRepository;
@@ -16,6 +17,7 @@ use App\Services\Dev\DevService;
 use App\Services\Export\IssueExportService;
 use App\Services\IssueCloseService;
 use App\Services\IssueService;
+use App\Services\Meeting\MeetingService;
 use App\Services\Pm\PmQueryService;
 use App\Services\Test\TestService;
 use App\Services\TicketService;
@@ -123,6 +125,98 @@ it('exports exactly the rows the pm issue list shows', function () {
         $sheet = $this->svc->pmIssuesSheet($this->pm, $this->p->id, $in);
         expect(($this->nos)($sheet))->toBe(($this->listed)($f), json_encode($in))
             ->and($sheet->columns)->not->toHaveKey('week');
+    }
+});
+
+it('classifies PM issues by creation and keeps later ticket and meeting links separate', function () {
+    $pm = ($this->as)($this->pm);
+    $pid = $this->p->id;
+    $issues = app(IssueService::class);
+    $tickets = app(TicketService::class);
+    $params = ['title' => '出處測試', 'content_html' => '<p>問題</p>'];
+    $accepted = collect(range(1, 3))->map(function ($n) use ($tickets, $pid, $params) {
+        $t = $tickets->create($this->client, $pid, $params + ['ticket_type' => 'bug']);
+
+        return $tickets->accept($this->pm, $t->id, $pid);
+    });
+    $customer = $issues->createFromTickets($this->pm, $pid, $accepted->take(2)->pluck('id')->all(), $params);
+    $internal = ieIssue($this->pm, $this->p, 'pm', $params);
+    $issues->link($this->pm, $customer->id, $pid, $accepted->last()->id);
+    $issues->link($this->pm, $internal->id, $pid, $accepted->last()->id);
+
+    $pm->post(route('meetings.store'), ['type' => 'regular', 'title' => '週會起源', 'start_at' => '2026-12-01 10:00', 'mode' => 'scheduled'])->assertSessionHasNoErrors();
+    $meeting = Meeting::sole();
+    $item = $pm->postJson(route('meetings.items.store', $meeting), ['topic' => '新議題'])->assertOk()->json('item.id');
+    $converted = app(MeetingService::class)->convertItem($this->pm, $pid, $meeting->id, $item, $params + ['origin' => 'pm']);
+    $pm->postJson(route('meetings.items.store', $meeting), ['topic' => '後續討論', 'issue_no' => $customer->issue_no])->assertOk();
+    $legacy = ieIssue($this->pm, $this->p, 'pm', $params);
+    app(EventRepository::class)->log($pid, 'issue', $legacy->id, 'imported', null, null, $this->pm->id, ['source' => '舊表', 'no' => 6]);
+    ieIssue($this->pm, $this->p, 'pm', $params)->delete();
+    $other = Project::create(['code' => 'OTHER', 'name' => 'OTHER', 'ticket_prefix' => 'O']);
+    ieIssue(ieUser('outside', 'internal', ['internal_pm'], $other), $other, 'pm', $params);
+
+    $f = ['q' => '出處測試', 'provenance' => 'meeting'];
+    $page = $pm->get(route('pm.index', $f))->assertOk()->assertSee('週會起源 · 事項 1')
+        ->assertSee(route('meetings.show', $meeting).'#item-'.$item)->assertSee('匯入待確認（1）');
+    expect($page->viewData('sourceCounts'))->toEqual(['ticket' => 1, 'meeting' => 1, 'internal' => 1, 'unknown_import' => 1])
+        ->and($page->viewData('issues')->pluck('id')->all())->toBe([$converted->id]);
+    foreach (['internal' => $internal, 'unknown_import' => $legacy, 'ticket' => $customer] as $code => $issue) {
+        $fl = ['provenance' => $code] + $f;
+        $board = $pm->get(route('pm.index', $fl))->assertOk();
+        expect($board->viewData('issues')->pluck('id')->all())->toBe([$issue->id]);
+        $row = $this->svc->pmIssuesSheet($this->pm, $pid, $fl)->rows[0];
+        expect($row['issue_no'])->toBe($issue->issue_no);
+        if ($code === 'ticket') {
+            expect($row['source_detail']->text)->toContain($accepted[0]->ticket_no, $accepted[1]->ticket_no, '已排入會議')->not->toContain($accepted[2]->ticket_no);
+            $board->assertSee('+1')->assertSee('已排入會議');
+        }
+        if ($code === 'unknown_import') {
+            expect($row['source_detail'])->toBe('Excel 舊表 #6');
+        }
+    }
+    $viewer = ieUser('without_meeting_access', 'internal', [], $this->p);
+    $restricted = $this->svc->pmIssuesSheet($viewer, $pid, $f);
+    expect($restricted->rows[0]['source_detail'])->toBe('會議事項');
+    $file = $pm->get(route('pm.export', $f))->assertOk();
+    expect(ieText(ieXml($file, 'xl/worksheets/sheet3.xml')))->toContain('問題出處', '來源明細', '週會起源 · 事項 1', $converted->issue_no)->not->toContain($internal->issue_no);
+    $pm->get(route('pm.index', ['q' => '無符合單據']))->assertOk()->assertDontSee('匯入待確認（0）');
+});
+
+it('keeps provenance counts across pages and restores the selected provenance and sort', function () {
+    for ($n = 1; $n <= 21; $n++) {
+        ieIssue($this->pm, $this->p, 'pm', ['title' => "分頁 {$n}"]);
+    }
+    ieIssue($this->pm, $this->p, 'pm', ['title' => '其他問題']);
+    $filters = ['provenance' => 'internal', 'q' => '分頁', 'sort' => 'severity_asc', 'tq' => '客戶查詢'];
+    $params = $filters + ['page' => 2];
+    $pm = ($this->as)($this->pm);
+    $board = $pm->get(route('pm.index', $params))->assertOk();
+    expect($board->viewData('sourceCounts'))->toBe(['internal' => 21])
+        ->and($board->viewData('issues')->count())->toBe(1)
+        ->and($board->viewData('issues')->total())->toBe(21);
+    $html = new DOMDocument;
+    @$html->loadHTML($board->getContent());
+    $header = (new DOMXPath($html))->query('//section[@id="internal-issues"]//th/a[@title]')->item(1);
+    parse_str(parse_url($header->getAttribute('href'), PHP_URL_QUERY), $toggled);
+    expect($toggled)->toEqual(['sort' => 'status'] + $filters);
+
+    $saved = app(SavedQueryService::class)->save($this->pm, $this->p->id, 'pm', '分類排序', $params);
+    expect($saved->params)->toEqual($filters)
+        ->and($this->svc->pmIssuesSheet($this->pm, $this->p->id, $params)->rows)->toHaveCount(21);
+});
+
+it('sorts PM lists and sheets both ways by severity and configured workflow order', function () {
+    $low = ieIssue($this->pm, $this->p, 'pm', ['severity' => 1, 'status' => 'dev_todo']);
+    $high = ieIssue($this->pm, $this->p, 'pm', ['severity' => 5, 'status' => 'new']);
+    $missing = ieIssue($this->pm, $this->p, 'pm', ['severity' => null, 'status' => 'test_pending']);
+    WorkflowStatus::where(['scope' => 'issue', 'code' => 'test_pending'])->update(['sort' => 1]);
+    foreach (['severity' => [$high, $low, $missing], 'severity_asc' => [$low, $high, $missing],
+        'status' => [$missing, $high, $low], 'status_desc' => [$low, $high, $missing]] as $sort => $expected) {
+        $params = ['sort' => $sort, 'provenance' => 'internal'];
+        $board = ($this->as)($this->pm)->get(route('pm.index', $params))->assertOk();
+        $numbers = array_column($expected, 'issue_no');
+        expect($board->viewData('issues')->pluck('issue_no')->all())->toBe($numbers)
+            ->and(array_column($this->svc->pmIssuesSheet($this->pm, $this->p->id, $params)->rows, 'issue_no'))->toBe($numbers);
     }
 });
 

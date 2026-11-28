@@ -69,6 +69,12 @@ class IssueImportService
         return self::FILE_CONTEXT.":$fileId:$no";
     }
 
+    /** @return array<string,string> */
+    public function provenanceOptions(): array
+    {
+        return array_diff_key($this->wf->lookupMap('issue_provenance'), ['unknown_import' => true]);
+    }
+
     /** @return string[] */
     public function sources(int $projectId): array
     {
@@ -123,9 +129,12 @@ class IssueImportService
      * @param  list<array{no:string, action:string, images?:int[], process_type?:?string, mes_page_id?:?int}>  $wanted
      * @return list<array{no:string, action:string, issue_id:int, issue_no:string}>
      */
-    public function apply(User $u, int $projectId, int $fileId, string $source, array $wanted): array
+    public function apply(User $u, int $projectId, int $fileId, string $source, array $wanted, ?string $provenance = null): array
     {
         $this->authorize($u, $projectId);
+        if (in_array('create', array_column($wanted, 'action'), true) && ! isset($this->provenanceOptions()[$provenance])) {
+            throw new BusinessException('請選擇有效的問題出處。');
+        }
         $source = $this->cleanSource($source);
         if ($wanted === []) {
             throw new BusinessException('請勾選要匯入的列。');
@@ -165,7 +174,7 @@ class IssueImportService
             ];
         }
 
-        return $this->uow->run(function () use ($u, $projectId, $fileId, $source, $plan) {
+        return $this->uow->run(function () use ($u, $projectId, $fileId, $source, $plan, $provenance) {
             $done = [];
             foreach ($plan as $p) {
                 $row = $p['row'];
@@ -185,7 +194,7 @@ class IssueImportService
                     ], $ctx);
                     $this->repo->create(['project_id' => $projectId, 'source' => $source, 'source_no' => $row['no'],
                         'issue_id' => $issue->id, 'content_hash' => $row['hash'], 'created_by' => $u->id]);
-                    $this->events->log($projectId, 'issue', $issue->id, 'imported', null, null, $u->id, ['source' => $source, 'no' => $row['no']]);
+                    $this->events->log($projectId, 'issue', $issue->id, 'imported', null, null, $u->id, ['source' => $source, 'no' => $row['no'], 'provenance' => $provenance]);
                     $done[] = ['no' => $row['no'], 'action' => 'create', 'issue_id' => $issue->id, 'issue_no' => $issue->issue_no];
                 } else {
                     if (! $existing) {

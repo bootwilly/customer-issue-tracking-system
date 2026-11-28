@@ -113,6 +113,43 @@ class IssueRepository
         return $i;
     }
 
+    /** Project-scoped creation evidence, one row per issue even after later links or discussions. */
+    private function classified(int $projectId, array $externalOrigins): Builder
+    {
+        $eventId = DB::table('events as e')->selectRaw('MAX(e.id)')
+            ->whereColumn('e.subject_id', 'issues.id')->where('e.project_id', $projectId)
+            ->where('e.subject_type', 'issue')->whereIn('e.event_type', ['created', 'from_meeting', 'imported']);
+        $importId = DB::table('issue_import_rows as r')->selectRaw('MIN(r.id)')
+            ->whereColumn('r.issue_id', 'issues.id')->where('r.project_id', $projectId);
+        $external = implode(', ', array_fill(0, count($externalOrigins), '?')) ?: 'NULL';
+        $query = DB::table('issues')->where('issues.project_id', $projectId)->whereNull('issues.deleted_at')
+            ->leftJoin('events as evidence', fn ($j) => $j->where('evidence.id', '=', $eventId))
+            ->leftJoin('issue_import_rows as imported', fn ($j) => $j->where('imported.id', '=', $importId))
+            ->select('issues.*', 'evidence.payload as source_payload', 'imported.source as import_source', 'imported.source_no as import_no');
+        $kind = $query->getGrammar()->wrap('evidence.payload->provenance');
+        $query->selectRaw("CASE WHEN evidence.event_type = 'from_meeting' THEN 'meeting'
+            WHEN evidence.event_type = 'imported' OR imported.id IS NOT NULL THEN COALESCE($kind, 'unknown_import')
+            WHEN issues.origin IN ($external) THEN 'ticket' ELSE 'internal' END AS provenance", $externalOrigins);
+
+        return Issue::query()->fromSub($query, 'issues')->withCasts(['source_payload' => 'array']);
+    }
+
+    public function provenanceCounts(int $projectId, array $filters): array
+    {
+        unset($filters['provenance']);
+
+        return $this->filtered($projectId, $filters)->reorder()->groupBy('provenance')
+            ->selectRaw('provenance, count(*) as total')->pluck('total', 'provenance')->all();
+    }
+
+    public function meetingItemsForSources(int $projectId, array $issueIds, array $itemIds): Collection
+    {
+        return DB::table('meeting_items as item')->join('meetings as m', 'm.id', '=', 'item.meeting_id')
+            ->where('m.project_id', $projectId)->where(fn ($q) => $q->whereIntegerInRaw('item.issue_id', $issueIds)
+            ->orWhereIntegerInRaw('item.id', $itemIds))
+            ->get(['item.id', 'item.meeting_id', 'item.issue_id']);
+    }
+
     /**
      * Single filter + order definition shared by the list page and the export (exported rows == listed rows).
      *
@@ -123,8 +160,9 @@ class IssueRepository
         $sort = self::SORTS[$f['sort'] ?? 'last'] ?? 'updated_at';
         $dir = ($f['dir'] ?? 'desc') === 'asc' ? 'asc' : 'desc';
 
-        return Issue::query()
-            ->where('project_id', $projectId)
+        $query = isset($f['externalOrigins']) ? $this->classified($projectId, $f['externalOrigins']) : Issue::query();
+        $query->where('project_id', $projectId)
+            ->when($f['provenance'] ?? null, fn ($q, $v) => $q->where('provenance', $v))
             ->when($f['stages'] ?? null, fn ($q, $v) => $q->whereIn('stage', $v))
             ->when($f['statuses'] ?? null, fn ($q, $v) => $q->whereIn('status', $v))
             ->when($f['origin'] ?? null, fn ($q, $v) => $q->where('origin', $v))
@@ -132,8 +170,17 @@ class IssueRepository
             ->when($f['test'] ?? null, fn ($q, $v) => $q->where('assignee_test_id', $v))
             ->when($f['tags'] ?? null, fn ($q, $v) => $q->whereIn('id', fn ($s) => $s->select('issue_id')->from('issue_tags')->whereIn('tag_code', $v)))
             ->when($f['overdue'] ?? false, fn ($q) => $q->whereNotNull('current_due')->whereDate('current_due', '<', now()->toDateString()))
-            ->when($f['q'] ?? null, fn ($q, $v) => $q->where(fn ($w) => $w->where('title', 'like', "%$v%")->orWhere('issue_no', 'like', "%$v%")))
-            ->orderBy($sort, $dir)->orderByDesc('id');
+            ->when($f['q'] ?? null, fn ($q, $v) => $q->where(fn ($w) => $w->where('title', 'like', "%$v%")->orWhere('issue_no', 'like', "%$v%")));
+        if (($f['sort'] ?? '') === 'status') {
+            $rank = DB::table('workflow_statuses')->select('sort')->where('scope', 'issue')->whereColumn('code', 'issues.status');
+
+            return $query->orderBy($rank, $dir)->orderBy('status', $dir)->orderByDesc('id');
+        }
+        if ($sort === 'severity') {
+            $query->orderByRaw('severity IS NULL');
+        }
+
+        return $query->orderBy($sort, $dir)->orderByDesc('id');
     }
 
     public function paginate(int $projectId, array $f, int $perPage = 20): LengthAwarePaginator

@@ -320,6 +320,11 @@ return [
         ['test_bounced_status', 'test_found', 'test_found', 10],
         ['test_bounced_status', 'test_failed', 'test_failed', 20],
         // issue origin labels; external = created from client tickets
+        ['issue_provenance', 'internal', '內部發現／討論', 10],
+        ['issue_provenance', 'meeting', '會議轉入', 20],
+        ['issue_provenance', 'ticket', '客戶單轉入', 30],
+        ['issue_provenance', 'unknown_import', '匯入待確認', 40],
+
         ['issue_origin', 'client', '客戶', 10],
         ['issue_origin', 'pm', 'PM', 20],
         ['issue_origin', 'dev', 'DEV', 30],

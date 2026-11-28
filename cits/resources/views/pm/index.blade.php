@@ -132,6 +132,19 @@
             </form>
             @include('dev._close-rounds')
         @else
+        <nav aria-label="問題出處" class="mb-3 flex flex-wrap items-center gap-2 text-sm">
+            <span class="font-medium text-slate-700">問題出處</span>
+            @foreach (['' => '全部'] + $sourceOptions as $code => $label)
+                @php
+                    $active = ($f['provenance'] ?? '') === $code;
+                    $count = $code === '' ? array_sum($sourceCounts) : ($sourceCounts[$code] ?? 0);
+                @endphp
+                @continue($code === 'unknown_import' && ! $count && ! $active)
+                <a href="{{ route('pm.index', request()->except(['page', 'provenance']) + ($code === '' ? [] : ['provenance' => $code])) }}#internal-issues"
+                   @if ($active) aria-current="true" @endif
+                   @class(['rounded-full border px-3 py-1', 'border-indigo-600 bg-indigo-50 text-indigo-800' => $active, 'border-slate-200 text-slate-600 hover:bg-slate-50' => ! $active])>{{ $label }}（{{ $count }}）</a>
+            @endforeach
+        </nav>
         <form method="GET" action="{{ route('pm.index') }}#internal-issues" class="mb-3 grid grid-cols-2 gap-2 md:flex md:flex-wrap md:items-center">
             @foreach ($keep(['stage', 'status', 'origin', 'q', 'sort', 'tags', 'page']) as $k => $v)<input type="hidden" name="{{ $k }}" value="{{ $v }}">@endforeach
             <select name="stage" class="{{ $input }}">
@@ -143,11 +156,11 @@
                 @foreach ($statuses as $s)<option value="{{ $s->code }}" @selected(($f['status'] ?? '') === $s->code)>{{ $s->name }}</option>@endforeach
             </select>
             <select name="origin" class="{{ $input }}">
-                <option value="">全部來源</option>
+                <option value="">全部開單來源</option>
                 @foreach ($origins as $o)<option value="{{ $o }}" @selected(($f['origin'] ?? '') === $o)>{{ $originLabels[$o] ?? $o }}</option>@endforeach
             </select>
             <select name="sort" class="{{ $input }}">
-                @foreach (['created' => '建立時間', 'last' => '最後更新', 'severity' => '嚴重度', 'due' => '預計完工'] as $k => $l)
+                @foreach ($sortOptions as $k => $l)
                     <option value="{{ $k }}" @selected(($f['sort'] ?? 'created') === $k)>排序：{{ $l }}</option>
                 @endforeach
             </select>
@@ -203,7 +216,18 @@
         <div class="overflow-x-auto">
             <table class="min-w-full divide-y divide-slate-200 text-sm">
                 <thead class="bg-slate-50 text-left text-xs text-slate-500">
-                    <tr>@if ($pickRows && $issues->isNotEmpty())<th class="w-8 px-3 py-2"><input type="checkbox" data-meet-all class="rounded border-slate-300" title="全選本頁"></th>@endif<th class="px-3 py-2">單號</th><th class="px-3 py-2">標題</th><th class="px-3 py-2">開單時間</th><th class="px-3 py-2">來源</th><th class="px-3 py-2">嚴重度</th><th class="px-3 py-2">狀態</th><th class="px-3 py-2">DEV<br>首次派開發</th><th class="px-3 py-2">Test<br>最近派測試（派測來源）</th><th class="px-3 py-2">預計完工</th><th class="px-3 py-2">客戶單</th></tr>
+                    <tr>@if ($pickRows && $issues->isNotEmpty())<th class="w-8 px-3 py-2"><input type="checkbox" data-meet-all class="rounded border-slate-300" title="全選本頁"></th>@endif<th class="px-3 py-2">單號</th><th class="px-3 py-2">標題</th><th class="px-3 py-2">開單時間</th><th class="px-3 py-2">問題出處</th>
+                        @foreach (['severity' => ['嚴重度', 'severity_asc'], 'status' => ['狀態', 'status_desc']] as $key => [$label, $reverse])
+                            @php
+                                $sort = $f['sort'] ?? 'created';
+                                $direction = in_array($sort, [$key, $reverse], true) ? (in_array($sort, ['status', 'severity_asc'], true) ? 'ascending' : 'descending') : null;
+                                $next = $sort === $key ? $reverse : $key;
+                            @endphp
+                            <th class="whitespace-nowrap px-3 py-2" @if ($direction) aria-sort="{{ $direction }}" @endif>
+                                <a href="{{ route('pm.index', request()->except(['sort', 'page']) + ['sort' => $next]) }}#internal-issues" title="{{ $sortOptions[$next] }}">{{ $label }} {{ $direction === 'ascending' ? '↑' : ($direction === 'descending' ? '↓' : '↕') }}</a>
+                            </th>
+                        @endforeach
+                        <th class="px-3 py-2">DEV<br>首次派開發</th><th class="px-3 py-2">Test<br>最近派測試（派測來源）</th><th class="px-3 py-2">預計完工</th><th class="px-3 py-2">客戶單</th></tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
                     @forelse ($issues as $i)
@@ -218,9 +242,14 @@
                                 @foreach ($issueTags[$i->id] ?? [] as $tg)<span class="ml-1 rounded bg-violet-100 px-1.5 py-0.5 text-xs text-violet-800">{{ $tagLabels[$tg] ?? $tg }}</span>@endforeach
                             </td>
                             <td class="whitespace-nowrap px-3 py-2">{{ $timeline[$i->id]['created_at'] }}</td>
-                            <td class="whitespace-nowrap px-3 py-2">
-                                {{ $originLabels[$i->origin] ?? $i->origin }}
-                                @if (! in_array($i->origin, $externalOrigins, true))<span class="ml-1 rounded bg-slate-200 px-1.5 py-0.5 text-xs text-slate-600">內部</span>@endif
+                            <td class="px-3 py-2">
+                                @php($source = $sources[$i->id])
+                                {{ $source['label'] }}
+                                <div class="max-w-48 truncate text-xs text-slate-500" title="{{ $source['detail'] }}">
+                                    @if ($source['url'])<a href="{{ $source['url'] }}" onclick="event.stopPropagation()" class="text-indigo-700 hover:underline">{{ $source['short'] }}</a>@else{{ $source['short'] }}@endif
+                                    @if ($source['more'])<span>+{{ $source['more'] }}</span>@endif
+                                </div>
+                                @if ($source['in_meeting'])<span class="text-xs text-slate-500">已排入會議</span>@endif
                             </td>
                             <td class="px-3 py-2">@include('pm._severity', ['n' => $i->severity])</td>
                             <td class="px-3 py-2"><x-badge :status="$i->status" scope="issue" /></td>

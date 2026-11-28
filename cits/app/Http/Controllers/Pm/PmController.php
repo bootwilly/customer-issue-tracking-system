@@ -62,7 +62,9 @@ class PmController extends Controller
             '頁籤' => '內部問題清單',
             '內部單：階段' => $label($f['stage'] ?? null),
             '內部單：狀態' => ($f['status'] ?? '') !== '' ? $wf->label('issue', $f['status']) : '全部',
-            '內部單：來源' => ($f['origin'] ?? '') !== '' ? $wf->lookupLabel('issue_origin', $f['origin']) : '全部',
+            '內部單：問題出處' => ! empty($f['provenance']) ? $wf->lookupLabel('issue_provenance', $f['provenance']) : '全部',
+            '內部單：排序' => PmQueryService::SORT_OPTIONS[$f['sort'] ?? 'created'],
+            '內部單：開單來源' => ($f['origin'] ?? '') !== '' ? $wf->lookupLabel('issue_origin', $f['origin']) : '全部',
             '內部單：關鍵字' => $label($f['q'] ?? null, '（無）'),
             '內部單：標籤（任一）' => ($f['tags'] ?? []) ? implode('、', array_map(fn ($c) => $wf->lookupLabel('issue_tag', $c), $f['tags'])) : '全部',
         ];
@@ -78,7 +80,8 @@ class PmController extends Controller
             'close_status' => 'nullable|string|max:30', 'close_mine' => 'nullable|in:0,1',
             'tags' => 'nullable|array|max:50', 'tags.*' => 'string|max:30',
             'stage' => 'nullable|string|max:10', 'status' => 'nullable|string|max:30', 'origin' => 'nullable|string|max:10',
-            'q' => 'nullable|string|max:100', 'sort' => 'nullable|in:created,last,severity,due',
+            'q' => 'nullable|string|max:100', 'sort' => 'nullable|in:'.implode(',', array_keys(PmQueryService::SORT_OPTIONS)),
+            'provenance' => 'nullable|string|in:'.implode(',', array_keys(app(WorkflowService::class)->lookupMapAll('issue_provenance'))),
         ]);
         $f['only_action'] = (string) ($f['oa'] ?? '1') === '1';
 
