@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Repositories\EventRepository;
 use App\Repositories\ProjectRepository;
 use DomainException;
+use Illuminate\Contracts\Pagination\Paginator;
 use Illuminate\Support\Collection;
 
 /**
@@ -136,18 +137,27 @@ class ProjectAdminService
         return $m;
     }
 
-    public function events(User $u, int $pid): Collection
+    public function events(User $u, int $pid): Paginator
     {
         if (! $this->canAny($u, $pid)) {
             throw new BusinessException('沒有權限執行此操作。');
         }
 
-        // subject type = workflow scope of the statuses an event carries
-        return $this->events->forProject($pid, ['member', 'flow', 'meeting'], 200, ['issue' => IssueTrashService::EVENTS])->each(function ($e) {
-            $e->label = $this->wf->lookupLabel('event_label', $e->event_type);
+        $page = $this->events->projectAudit($pid, IssueTrashService::EVENTS, $u->seesInternal());
+        $legacy = $page->getCollection()->where('subject_type', 'issue')->where('event_type', 'imported');
+        $numbers = $this->events->legacyImportNumbers($pid, $legacy->pluck('subject_id')->all());
+        foreach ($legacy as $event) {
+            $event->legacy_issue_no = $numbers->get($event->subject_id);
+        }
+
+        $labels = $this->wf->lookupMapAll('event_label');
+        $page->getCollection()->each(function ($e) use ($labels) {
+            $e->label = $labels[$e->event_type] ?? $e->event_type;
             $e->from_label = $e->from_status ? $this->wf->label($e->subject_type, $e->from_status) : null;
             $e->to_label = $e->to_status ? $this->wf->label($e->subject_type, $e->to_status) : null;
         });
+
+        return $page;
     }
 
     private function call(callable $fn): void

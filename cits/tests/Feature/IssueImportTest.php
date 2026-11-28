@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\ActivityEvent;
 use App\Models\Attachment;
 use App\Models\Issue;
 use App\Models\IssueAddendum;
@@ -7,8 +8,10 @@ use App\Models\IssueImportRow;
 use App\Models\MesPage;
 use App\Models\Project;
 use App\Models\User;
+use App\Repositories\EventRepository;
 use App\Services\Import\IssueImportService;
 use App\Services\Import\XlsxIssueReader;
+use App\Services\IssueService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use OpenSpout\Common\Entity\Cell\StringCell;
@@ -299,4 +302,82 @@ it('keeps the import to internal PMs and to the uploader\'s own file', function 
     ($this->as)($other)->get("/pm/issues/import/{$file}/media?p=xl/media/image1.png")->assertNotFound();
     ($this->as)($this->pm)->get('/pm/issues/import')->assertOk()->assertSee('下載標準範本');
     ($this->as)($this->pm)->get('/pm')->assertOk()->assertSee('Excel 匯入');
+});
+
+it('audits each confirmed Excel import once, with the exact rows and actions', function () {
+    $admin = impUser('import-auditor', 'internal', ['project_admin'], $this->p);
+    $first = $this->rows[3];
+    $first['no'] = '101';
+    $second = $this->rows[3];
+    $second['no'] = '202';
+    $third = $this->rows[3];
+    $third['no'] = '303';
+    $file = ($this->upload)($this->pm, impWorkbook([$first]));
+    $apply = fn ($id, $rows) => ($this->as)($this->pm)->postJson(route('pm.issues.import.apply'), [
+        'file_id' => $id, 'source' => 'QA-BOOK', 'rows' => $rows, 'provenance' => 'meeting',
+    ]);
+    $row = fn ($no, $action) => ['no' => $no, 'action' => $action, 'images' => []];
+    ($this->as)($this->pm)->postJson(route('pm.issues.import.preview'), ['file_id' => $file, 'source' => 'QA-BOOK'])->assertOk();
+    expect(ActivityEvent::where('event_type', 'imported')->count())->toBe(0);
+
+    $firstNo = $apply($file, [$row('101', 'create')])->assertOk()->json('done.0.issue_no');
+    $first['content'] .= ' amended';
+    $file2 = ($this->upload)($this->pm, impWorkbook([$first, $second, $third]));
+    $mixed = [$row('101', 'addendum'), $row('202', 'create')];
+    $secondNo = $apply($file2, $mixed)->assertOk()->json('done.1.issue_no');
+    $apply($file2, $mixed)->assertUnprocessable();
+    $thirdNo = $apply($file2, [$row('303', 'create')])->assertOk()->json('done.0.issue_no');
+    $third['content'] .= ' amended';
+    $file3 = ($this->upload)($this->pm, impWorkbook([$third]));
+    $apply($file3, [$row('303', 'addendum')])->assertOk();
+
+    $page = ($this->as)($admin)->get(route('padmin.events'))->assertOk()
+        ->assertSeeText('新增 1 張、補充 1 張')->assertSeeText('新增 0 張、補充 1 張')
+        ->assertSeeText('QA-BOOK')->assertSeeText($this->pm->name)->assertDontSeeText('歷史匯入');
+    $batches = $page->viewData('events')->getCollection()->where('event_type', 'imported')->values();
+    expect($batches)->toHaveCount(4)
+        ->and(substr_count($page->getContent(), '<details>'))->toBe(4)
+        ->and($batches->pluck('payload.batch_id')->unique())->toHaveCount(4)
+        ->and($batches[1]->subject_id)->toEqual($batches[2]->subject_id)
+        ->and(array_column($batches[2]->payload['rows'], 'issue_no', 'no'))->toBe(['101' => $firstNo, '202' => $secondNo])
+        ->and($batches[0]->payload['rows'][0]['issue_no'])->toBe($thirdNo);
+    $page->assertSeeInOrder(['101', $firstNo, '補充', '202', $secondNo, '新增']);
+    expect(ActivityEvent::where('subject_type', 'issue')->where('event_type', 'imported')->count())->toBe(3);
+});
+
+it('rolls back every row and audit event when a later row fails inside the import transaction', function () {
+    $file = ($this->upload)($this->pm, impWorkbook([$this->rows[3]]));
+    $row = ['no' => '4', 'action' => 'create', 'images' => []];
+    ($this->as)($this->pm)->postJson(route('pm.issues.import.apply'), ['file_id' => $file, 'source' => 'rollback',
+        'rows' => [$row, $row], 'provenance' => 'meeting'])->assertUnprocessable();
+    expect(Issue::count())->toBe(0)->and(IssueImportRow::count())->toBe(0)
+        ->and(ActivityEvent::where('event_type', 'imported')->count())->toBe(0);
+});
+
+it('lists legacy imports individually with live, trashed or purged numbers, scoped to the project', function () {
+    $admin = impUser('legacy-auditor', 'internal', ['project_admin'], $this->p);
+    $other = Project::create(['code' => 'OTH', 'ticket_prefix' => 'OTH', 'name' => 'Other']);
+    $log = app(EventRepository::class);
+    $issues = [];
+    foreach (['live', 'trash', 'purge'] as $no) {
+        $i = app(IssueService::class)->createInternal($this->pm, $this->p->id, 'pm', ['title' => $no, 'severity' => 2, 'content_html' => 'x']);
+        $issues[$no] = $i;
+        $log->log($this->p->id, 'issue', $i->id, 'imported', null, null, $this->pm->id, ['source' => 'OLD-REPORT', 'no' => $no]);
+        if ($no !== 'live') {
+            ($this->as)($this->pm)->delete(route('issues.destroy', $i->id))->assertSessionHas('ok');
+        }
+    }
+    ($this->as)($admin)->delete(route('padmin.trash.issues.purge', $issues['purge']->id), ['confirm_no' => $issues['purge']->issue_no])->assertSessionHas('ok');
+    $log->log($other->id, 'issue', $issues['live']->id, 'imported', null, null, $this->pm->id, ['source' => 'OTHER-PROJECT', 'no' => 'foreign']);
+    $page = ($this->as)($admin)->get(route('padmin.events'))->assertOk()->assertDontSeeText('OTHER-PROJECT');
+    foreach ($issues as $no => $issue) {
+        $page->assertSeeText("歷史匯入 · 來源 OLD-REPORT · Excel 序號 {$no} · 內部單號 {$issue->issue_no}");
+    }
+    expect(substr_count($page->getContent(), '歷史匯入'))->toBe(3);
+    foreach (range(1, 50) as $n) {
+        $log->log($this->p->id, 'member', $admin->id, 'member_added', null, null, $admin->id);
+    }
+    ($this->as)($admin)->get(route('padmin.events'))->assertOk()->assertDontSeeText('OLD-REPORT');
+    ($this->as)($admin)->get(route('padmin.events', ['page' => 2]))->assertOk()->assertSeeText('OLD-REPORT');
+    ($this->as)($this->pm)->get(route('padmin.events'))->assertForbidden();
 });

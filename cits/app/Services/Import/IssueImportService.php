@@ -12,6 +12,7 @@ use App\Services\AttachmentService;
 use App\Services\Collab\SimilarService;
 use App\Services\IssueService;
 use App\Services\WorkflowService;
+use Illuminate\Support\Str;
 
 /**
  * Excel import of PM internal issues from the standard template (see IssueImportTemplateService).
@@ -175,6 +176,7 @@ class IssueImportService
         }
 
         return $this->uow->run(function () use ($u, $projectId, $fileId, $source, $plan, $provenance) {
+            $batchId = (string) Str::ulid();
             $done = [];
             foreach ($plan as $p) {
                 $row = $p['row'];
@@ -194,17 +196,21 @@ class IssueImportService
                     ], $ctx);
                     $this->repo->create(['project_id' => $projectId, 'source' => $source, 'source_no' => $row['no'],
                         'issue_id' => $issue->id, 'content_hash' => $row['hash'], 'created_by' => $u->id]);
-                    $this->events->log($projectId, 'issue', $issue->id, 'imported', null, null, $u->id, ['source' => $source, 'no' => $row['no'], 'provenance' => $provenance]);
+                    $this->events->log($projectId, 'issue', $issue->id, 'imported', null, null, $u->id, ['source' => $source, 'no' => $row['no'], 'provenance' => $provenance, 'batch_id' => $batchId]);
                     $done[] = ['no' => $row['no'], 'action' => 'create', 'issue_id' => $issue->id, 'issue_no' => $issue->issue_no];
                 } else {
-                    if (! $existing) {
-                        throw new BusinessException("序號 {$row['no']} 的匯入紀錄不存在，請重新預覽。");
+                    if (! $existing || $existing->issue_id !== $row['existing']['issue_id'] || $existing->content_hash === $row['hash']) {
+                        throw new BusinessException("序號 {$row['no']} 的匯入紀錄已變更，請重新預覽。");
                     }
                     $this->issues->addAddendum($u, $existing->issue_id, $projectId, $html, $ctx);
                     $this->repo->saveHash($existing, $row['hash']);
                     $done[] = ['no' => $row['no'], 'action' => 'addendum', 'issue_id' => $existing->issue_id, 'issue_no' => $row['existing']['issue_no'] ?? ''];
                 }
             }
+
+            $this->events->log($projectId, 'import', $fileId, 'imported', null, null, $u->id, [
+                'batch_id' => $batchId, 'source' => $source, 'rows' => $done,
+            ]);
 
             return $done;
         });

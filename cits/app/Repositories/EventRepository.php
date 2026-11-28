@@ -3,10 +3,12 @@
 namespace App\Repositories;
 
 use App\Models\ActivityEvent;
+use App\Models\Issue;
 use App\Models\OutboxMail;
 use App\Models\User;
 use App\Models\UserNotification;
 use App\Models\WorkflowTransition;
+use Illuminate\Contracts\Pagination\Paginator;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -125,27 +127,35 @@ class EventRepository
             ->orderBy('id')->get();
     }
 
-    /**
-     * Recent events of a project for the given subject types (project admin audit page).
-     *
-     * @param  string[]  $subjectTypes
-     * @return Collection<int, ActivityEvent>
-     */
-    /**
-     * @param  string[]  $subjectTypes  every event of these subjects
-     * @param  array<string, string[]>  $only  subject type => only these event types
-     */
-    public function forProject(int $projectId, array $subjectTypes, int $limit = 200, array $only = []): Collection
+    public function projectAudit(int $projectId, array $trashEvents, bool $includeImports): Paginator
     {
-        return ActivityEvent::with('actor:id,name,account')
-            ->where('project_id', $projectId)
-            ->where(function ($q) use ($subjectTypes, $only) {
-                $q->whereIn('subject_type', $subjectTypes);
-                foreach ($only as $type => $events) {
-                    $q->orWhere(fn ($w) => $w->where('subject_type', $type)->whereIn('event_type', $events));
+        return ActivityEvent::with('actor:id,name,account')->where('project_id', $projectId)
+            ->where(function ($q) use ($trashEvents, $includeImports) {
+                $q->whereIn('subject_type', ['member', 'flow', 'meeting'])
+                    ->orWhere(fn ($issue) => $issue->where('subject_type', 'issue')->whereIn('event_type', $trashEvents));
+                if ($includeImports) {
+                    $q->orWhere(fn ($batch) => $batch->where('subject_type', 'import')->where('event_type', 'imported'))
+                        ->orWhere(fn ($legacy) => $legacy->where('subject_type', 'issue')->where('event_type', 'imported')->whereNull('payload->batch_id'));
                 }
             })
-            ->orderByDesc('id')->limit($limit)->get();
+            ->orderByDesc('id')->simplePaginate(50);
+    }
+
+    /** Older import events have an issue ID but no issue number snapshot. */
+    public function legacyImportNumbers(int $projectId, array $ids): Collection
+    {
+        if (! $ids) {
+            return collect();
+        }
+        $numbers = Issue::withTrashed()->where('project_id', $projectId)->whereIn('id', $ids)->pluck('issue_no', 'id');
+        $missing = array_diff($ids, $numbers->keys()->all());
+        if ($missing) {
+            $purged = ActivityEvent::where('project_id', $projectId)->where('subject_type', 'issue')->where('event_type', 'issue_purged')
+                ->whereIn('subject_id', $missing)->get(['subject_id', 'payload'])->pluck('payload.issue', 'subject_id');
+            $numbers = $numbers->union($purged);
+        }
+
+        return $numbers;
     }
 
     /** User ids in the project holding a permission through any role assigned in that project. */

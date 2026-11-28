@@ -169,6 +169,8 @@ Status: P1 deployed to production (https://<domain>/mescits/). P2 features in pr
 - Shapes are composed into PNG in the browser (canvas), not on the server (no GD/font dependency). Picture uploads use per-row contexts so bindFromHtml of one issue never deletes another row's temp pictures.
 - Re-import key = project + source code + row number (no column) (issue_import_rows). Never fake created_at for imported rows; the original date stays in the content.
 
+- Each successful PM Excel import confirmation writes one project audit event in the same transaction as its rows (subject import, event imported). Batch payloads snapshot applied row actions and issue numbers. New per-issue imported events retain provenance and a batch_id; old events without one remain individual audit entries.
+
 ## Internal issue closure (2026-11-28)
 - The internal PM permission issue.close initiates PM or meeting closure. A meeting close uses the linked item's saved conclusion and requires an editable meeting. Linked tickets require a separate client-visible note.
 - issue_close_wrapup maps the current workflow status to wrap-up roles. Assigned DEV/Test users and the release.manage pool acknowledge with a note. All actions lock the issue first; completion also locks the task. Withdraw voids outstanding tasks and restores the original status. A new request starts a new round.

@@ -18,13 +18,30 @@
                             <td class="px-3 py-2">{{ $e->actor?->name }}</td>
                             <td class="px-3 py-2">{{ $e->label }}</td>
                             <td class="px-3 py-2 text-xs text-slate-600">
-                                @if ($e->subject_type === 'issue' && isset($p['issue']))<span class="font-medium">{{ $p['issue'] }}</span>@endif
-                                {{ $p['title'] ?? (isset($p['account']) ? $p['account'].' '.($p['name'] ?? '') : '') }}
-                                @if (isset($p['version']))　v{{ $p['version'] }}@endif
-                                @if (isset($p['versions']))　共 {{ $p['versions'] }} 版@endif
-                                @if ($e->to_label && $e->from_label !== $e->to_label)　{{ $e->from_label ?? '—' }} → {{ $e->to_label }}@endif
-                                @if (isset($p['from'], $p['to']) && is_array($p['from']))　{{ implode('、', $p['from']) ?: '無' }} → {{ implode('、', $p['to']) ?: '無' }}@endif
-                                @if (! empty($p['note']))　「{{ $p['note'] }}」@endif
+                                @if ($e->subject_type === 'import' && $e->event_type === 'imported')
+                                    @php $counts = array_count_values(array_column($p['rows'], 'action')); @endphp
+                                    <details>
+                                        <summary class="cursor-pointer">來源 {{ $p['source'] }} · 新增 {{ $counts['create'] ?? 0 }} 張、補充 {{ $counts['addendum'] ?? 0 }} 張</summary>
+                                        <table class="mt-2 text-left">
+                                            <thead><tr><th class="pr-4">Excel 序號</th><th class="pr-4">內部單號</th><th>處理</th></tr></thead>
+                                            <tbody>
+                                                @foreach ($p['rows'] as $row)
+                                                    <tr><td class="pr-4">{{ $row['no'] }}</td><td class="pr-4">{{ $row['issue_no'] }}</td><td>{{ $row['action'] === 'create' ? '新增' : '補充' }}</td></tr>
+                                                @endforeach
+                                            </tbody>
+                                        </table>
+                                    </details>
+                                @elseif ($e->subject_type === 'issue' && $e->event_type === 'imported')
+                                    歷史匯入 · 來源 {{ $p['source'] ?? '未記錄' }} · Excel 序號 {{ $p['no'] ?? '未記錄' }} · 內部單號 {{ $e->legacy_issue_no ?? '無單號紀錄' }}
+                                @else
+                                    @if ($e->subject_type === 'issue' && isset($p['issue']))<span class="font-medium">{{ $p['issue'] }}</span>@endif
+                                    {{ $p['title'] ?? (isset($p['account']) ? $p['account'].' '.($p['name'] ?? '') : '') }}
+                                    @if (isset($p['version']))　v{{ $p['version'] }}@endif
+                                    @if (isset($p['versions']))　共 {{ $p['versions'] }} 版@endif
+                                    @if ($e->to_label && $e->from_label !== $e->to_label)　{{ $e->from_label ?? '—' }} → {{ $e->to_label }}@endif
+                                    @if (isset($p['from'], $p['to']) && is_array($p['from']))　{{ implode('、', $p['from']) ?: '無' }} → {{ implode('、', $p['to']) ?: '無' }}@endif
+                                    @if (! empty($p['note']))　「{{ $p['note'] }}」@endif
+                                @endif
                             </td>
                         </tr>
                     @endforeach
@@ -32,4 +49,5 @@
             </table>
         </div>
     @endif
+    {{ $events->links() }}
 @endsection
