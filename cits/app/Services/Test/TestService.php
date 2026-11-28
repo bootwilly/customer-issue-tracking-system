@@ -76,7 +76,7 @@ class TestService
         $data = ['tabs' => self::TABS, 'tab' => $fl['tab'], 'mine' => $fl['mine'], 'status' => $fl['status'],
             'q' => $fl['q'], 'canManage' => $this->canManage($u, $pid)];
         if ($fl['tab'] === 'close') {
-            return $data + $this->closeList->page($u, $pid, $fl, testing: true);
+            return $data + $this->closeList->page($u, $pid, $fl, IssueCloseListService::TEST);
         }
         $issues = $this->issues->paginate($pid, $fl['f'], 20)->appends(['f' => 1]);
 

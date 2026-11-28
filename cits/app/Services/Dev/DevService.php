@@ -114,7 +114,7 @@ class DevService
         ];
 
         if ($tab === 'close') {
-            return $this->closeList->page($u, $pid, $fl, testing: false) + $data;
+            return $this->closeList->page($u, $pid, $fl, IssueCloseListService::DEV) + $data;
         }
         if ($tab === 'schedule') {
             $scheduled = $this->scheduleIssues($u, $pid, $fl['mine']);

@@ -7,27 +7,44 @@ use App\Models\OutboxMail;
 use App\Models\User;
 use App\Models\UserNotification;
 use App\Models\WorkflowTransition;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class EventRepository
 {
-    /** First internal status change through a dispatch transition, keyed by issue ID. */
-    public function firstDevDispatchTimes(int $projectId, array $issueIds, string $target): Collection
+    /** First PM-to-DEV handoff, keyed by issue ID or the historical close request's event ID. */
+    public function firstDevDispatchTimes(int $projectId, array $ids, string $target, bool $atClose = false): Collection
     {
-        if (! $issueIds) {
+        if (! $ids) {
             return collect();
         }
         $sources = WorkflowTransition::where(['scope' => 'issue', 'to_code' => $target])
             ->get(['from_code', 'permission'])
             ->filter(fn ($t) => in_array('issue.dispatch', explode('|', $t->permission), true))
             ->pluck('from_code');
+        $sent = DB::table('events as sent')->where(['sent.project_id' => $projectId, 'sent.subject_type' => 'issue',
+            'sent.event_type' => 'status', 'sent.to_status' => $target])->whereIn('sent.from_status', $sources);
 
-        return DB::table('events')
-            ->where(['project_id' => $projectId, 'subject_type' => 'issue', 'event_type' => 'status', 'to_status' => $target])
-            ->whereIn('from_status', $sources)->whereIntegerInRaw('subject_id', $issueIds)
-            ->groupBy('subject_id')->selectRaw('subject_id, MIN(created_at) AS dispatched_at')
-            ->pluck('dispatched_at', 'subject_id');
+        if ($atClose) {
+            $this->beforeClose($sent);
+            $first = $sent->whereColumn('sent.subject_id', 'a.subject_id')->select('sent.created_at')
+                ->orderBy('sent.created_at')->orderBy('sent.id')->limit(1);
+
+            return DB::table('events as a')->where(['a.project_id' => $projectId, 'a.subject_type' => 'issue', 'a.event_type' => 'close_requested'])
+                ->whereIntegerInRaw('a.id', $ids)->select('a.id')->selectSub($first, 'dispatched_at')->get()
+                ->whereNotNull('dispatched_at')->pluck('dispatched_at', 'id');
+        }
+
+        return $sent->whereIntegerInRaw('sent.subject_id', $ids)->groupBy('sent.subject_id')
+            ->selectRaw('sent.subject_id, MIN(sent.created_at) AS dispatched_at')->pluck('dispatched_at', 'subject_id');
+    }
+
+    private function beforeClose(Builder $sent): void
+    {
+        // Event IDs disambiguate multiple workflow changes in the same second.
+        $sent->where(fn ($q) => $q->whereColumn('sent.created_at', '<', 'a.created_at')->orWhere(fn ($tie) => $tie
+            ->whereColumn('sent.created_at', 'a.created_at')->whereColumn('sent.id', '<', 'a.id')));
     }
 
     /** Keyed by issue ID for current lists, or by close_requested event ID for historical rounds. */
@@ -54,9 +71,7 @@ class EventRepository
             })->orderByDesc('sent.created_at')->orderByDesc('sent.id')->limit(1);
         if ($atClose) {
             $anchors->where(['a.subject_type' => 'issue', 'a.event_type' => 'close_requested']);
-            // The event ID orders a withdrawal, re-dispatch and new request within the same second.
-            $last->where(fn ($q) => $q->whereColumn('sent.created_at', '<', 'a.created_at')->orWhere(fn ($tie) => $tie
-                ->whereColumn('sent.created_at', 'a.created_at')->whereColumn('sent.id', '<', 'a.id')));
+            $this->beforeClose($last);
         }
 
         return DB::query()->fromSub($anchors->selectSub($last, 'dispatch_id'), 'matches')

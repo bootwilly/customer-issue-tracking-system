@@ -56,6 +56,10 @@ class IssueExportService
     /** PM issue list: $f = PmController::index validated filters (stage,status,origin,q,sort). */
     public function pmIssuesSheet(User $u, int $projectId, array $f): ExportSheet
     {
+        if (($f['itab'] ?? '') === 'close') {
+            return $this->closeSheet($u, $projectId, $this->pm->closeFilters($f), IssueCloseListService::PM);
+        }
+
         return $this->issueSheet('pm_issues', $projectId, $this->pm->issueFilters($f));
     }
 
@@ -64,7 +68,7 @@ class IssueExportService
         $fl = $this->dev->filters($u, $projectId, $in);
         $info = ['頁籤' => DevService::TABS[$fl['tab']]];
         if ($fl['tab'] === 'close') {
-            return $this->closeBook($u, $projectId, $fl, testing: false);
+            return $this->closeBook($u, $projectId, $fl, IssueCloseListService::DEV);
         }
         if ($fl['tab'] === 'schedule') {
             $groups = $this->dev->scheduleGroups($this->dev->scheduleIssues($u, $projectId, $fl['mine']));
@@ -96,7 +100,7 @@ class IssueExportService
     {
         $fl = $this->test->filters($u, $projectId, $in);
         if ($fl['tab'] === 'close') {
-            return $this->closeBook($u, $projectId, $fl, testing: true);
+            return $this->closeBook($u, $projectId, $fl, IssueCloseListService::TEST);
         }
         $sheet = $this->issueSheet('test_issues', $projectId, $fl['f'], '測試問題');
         $info = [
@@ -109,22 +113,34 @@ class IssueExportService
         return $this->book('test_issues', $projectId, '測試問題', $sheet, $info);
     }
 
-    private function closeBook(User $u, int $projectId, array $fl, bool $testing): ExportBook
+    private function closeBook(User $u, int $projectId, array $fl, string $audience): ExportBook
     {
-        $rows = $this->closeList->rows($u, $projectId, $fl, $testing, $this->xlsx->maxRows() + 1);
+        $sheet = $this->closeSheet($u, $projectId, $fl, $audience);
+
+        return $this->book($audience.'_issues', $projectId, $sheet->name, $sheet, $this->closeInfo($fl));
+    }
+
+    public function closeInfo(array $fl): array
+    {
+        return [
+            '頁籤' => '結案收尾',
+            '收尾狀態' => $this->closeList->statuses()[$fl['status']],
+            '關鍵字' => $fl['q'] !== '' ? $fl['q'] : '無',
+            '只看我待確認' => $fl['mine'] ? '是' : '否',
+        ];
+    }
+
+    private function closeSheet(User $u, int $projectId, array $fl, string $audience): ExportSheet
+    {
+        $rows = $this->closeList->rows($u, $projectId, $fl, $audience, $this->xlsx->maxRows() + 1);
         $this->xlsx->assertWithinLimit($rows->count());
-        $sheet = new ExportSheet('結案收尾', $this->closeList->columns($testing), $rows->map(function ($row) {
+
+        return new ExportSheet('結案收尾', $this->closeList->columns($audience), $rows->map(function ($row) {
             $row['issue_no'] = new ExportLink($row['issue_no'], route('issues.show', $row['issue_id']).'#close-tasks');
             unset($row['issue_id']);
 
             return $row;
         })->all());
-        $info['頁籤'] = $sheet->name;
-        $info['收尾狀態'] = $this->closeList->statuses()[$fl['status']];
-        $info['關鍵字'] = $fl['q'] !== '' ? $fl['q'] : '無';
-        $info['只看我待確認'] = $fl['mine'] ? '是' : '否';
-
-        return $this->book($testing ? 'test_issues' : 'dev_issues', $projectId, $sheet->name, $sheet, $info);
     }
 
     /** @param array<string,string> $info */
@@ -169,7 +185,13 @@ class IssueExportService
         }
 
         $cols = $this->columns->columns($listKey, array_keys($resolvers));
-        if ($listKey === 'dev_issues') {
+        if ($listKey === 'pm_issues') {
+            $timeline = $this->dispatch->pmTimeline($projectId, $issues);
+            $cols = array_replace($cols, IssueDispatchService::PM_COLUMNS);
+            foreach (IssueDispatchService::PM_COLUMNS as $key => $label) {
+                $resolvers[$key] = fn (Issue $i) => $timeline[$i->id][$key];
+            }
+        } elseif ($listKey === 'dev_issues') {
             $times = $this->dispatch->devTimes($projectId, $issues->pluck('id')->all());
             $cols['dispatched_at'] = IssueDispatchService::DEV_LABEL;
             $resolvers['dispatched_at'] = fn (Issue $i) => $times[$i->id] ?? '—';

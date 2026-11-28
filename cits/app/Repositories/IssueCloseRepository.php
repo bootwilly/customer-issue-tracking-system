@@ -65,15 +65,15 @@ class IssueCloseRepository
     }
 
     /** Group before filtering by owner so progress includes every task in the round. */
-    public function rounds(int $projectId, ?string $status, string $keyword, ?int $mine, bool $admin, bool $release, ?int $limit): Collection|LengthAwarePaginator
+    public function rounds(int $projectId, ?string $status, string $keyword, ?int $mine, bool $admin, bool $release, ?int $limit, string $pageName): Collection|LengthAwarePaginator
     {
         $totals = DB::table('issue_close_tasks as t')
             ->join('issues as i', 'i.id', '=', 't.issue_id')
             ->where('i.project_id', $projectId)->whereNull('i.deleted_at')
             ->when($keyword !== '', fn ($q) => $q->where(fn ($w) => $w
                 ->where('i.issue_no', 'like', "%{$keyword}%")->orWhere('i.title', 'like', "%{$keyword}%")))
-            ->groupBy('t.issue_id', 't.round', 'i.issue_no', 'i.title')
-            ->select('t.issue_id', 't.round', 'i.issue_no', 'i.title')
+            ->groupBy('t.issue_id', 't.round', 'i.issue_no', 'i.title', 'i.created_at')
+            ->select('t.issue_id', 't.round', 'i.issue_no', 'i.title', 'i.created_at')
             ->selectRaw("COUNT(*) AS total, COUNT(CASE WHEN t.status = 'done' THEN 1 END) AS done_count")
             ->selectRaw("CASE WHEN COUNT(CASE WHEN t.status = 'void' THEN 1 END) > 0 THEN 'void'
                 WHEN COUNT(CASE WHEN t.status = 'pending' THEN 1 END) > 0 THEN 'pending' ELSE 'done' END AS round_status");
@@ -96,7 +96,7 @@ class IssueCloseRepository
                 }));
         }
 
-        return $limit === null ? $query->paginate(20)->withQueryString() : $query->limit($limit)->get();
+        return $limit === null ? $query->paginate(20, ['*'], $pageName)->withQueryString() : $query->limit($limit)->get();
     }
 
     public function pendingOwners(array $issueIds): Collection

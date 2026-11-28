@@ -25,16 +25,20 @@ class PmController extends Controller
         $u = $this->guard($request, 'issue.view');
         $f = $this->filters($request);
 
-        return view('pm.index', $q->board($this->pid(), $u, $f) + [
+        $data = $q->board($this->pid(), $u, $f);
+        if (($f['itab'] ?? '') !== 'close') {
+            $data['meetingTargets'] = $meetings->schedulableFor($u, $this->pid());
+            $data['canCreateMeeting'] = $meetings->canCreate($u, $this->pid());
+        }
+
+        return view('pm.index', $data + [
             'f' => $f + ['oa' => $f['only_action'] ? '1' : '0'],
             'canExport' => app(WorkflowService::class)->can($u, 'data.export', $this->pid()),
-            'meetingTargets' => $meetings->schedulableFor($u, $this->pid()),
-            'canCreateMeeting' => $meetings->canCreate($u, $this->pid()),
         ]);
     }
 
-    /** Excel export of both PM lists with the page's current filters: sheet 客戶單 + sheet 內部單 (each with a detail sheet). */
-    public function export(Request $request, TicketExportService $tickets, IssueExportService $issues, XlsxExportService $xlsx, WorkflowService $wf)
+    /** Export the filtered customer tickets alongside the selected internal tab. */
+    public function export(Request $request, TicketExportService $tickets, IssueExportService $issues, XlsxExportService $xlsx, WorkflowService $wf, PmQueryService $q)
     {
         $u = $this->guard($request, 'issue.view');
         $this->guard($request, 'data.export');
@@ -50,7 +54,12 @@ class PmController extends Controller
             '客戶單：範圍' => ($f['tt'] ?? '') === 'all' ? '全部' : $wf->lookupLabel('client_tab', $wf->ticketScope($f['tt'] ?? null)),
             '客戶單：只看需處理' => $f['only_action'] && $wf->isDefaultTicketScope($f['tt'] ?? null) ? '是' : '否',
             '客戶單：關鍵字' => $label($f['tq'] ?? null, '（無）'),
-            '客戶單：補充資料' => match ($f['ni'] ?? null) { 'waiting' => '等待客戶補充', 'answered' => '客戶已補充', default => '全部' },
+            '客戶單：補充資料' => match ($f['ni'] ?? null) {
+                'waiting' => '等待客戶補充', 'answered' => '客戶已補充', default => '全部'
+            },
+        ];
+        $info += ($f['itab'] ?? '') === 'close' ? $issues->closeInfo($q->closeFilters($f)) : [
+            '頁籤' => '內部問題清單',
             '內部單：階段' => $label($f['stage'] ?? null),
             '內部單：狀態' => ($f['status'] ?? '') !== '' ? $wf->label('issue', $f['status']) : '全部',
             '內部單：來源' => ($f['origin'] ?? '') !== '' ? $wf->lookupLabel('issue_origin', $f['origin']) : '全部',
@@ -65,6 +74,8 @@ class PmController extends Controller
     {
         $f = $request->validate([
             'oa' => 'nullable|in:0,1', 'tt' => 'nullable|string|max:20', 'tq' => 'nullable|string|max:100', 'ni' => 'nullable|in:waiting,answered',
+            'itab' => 'nullable|in:issues,close', 'close_q' => 'nullable|string|max:100',
+            'close_status' => 'nullable|string|max:30', 'close_mine' => 'nullable|in:0,1',
             'tags' => 'nullable|array|max:50', 'tags.*' => 'string|max:30',
             'stage' => 'nullable|string|max:10', 'status' => 'nullable|string|max:30', 'origin' => 'nullable|string|max:10',
             'q' => 'nullable|string|max:100', 'sort' => 'nullable|in:created,last,severity,due',

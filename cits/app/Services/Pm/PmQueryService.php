@@ -11,7 +11,9 @@ use App\Services\Collab\DependencyService;
 use App\Services\Collab\NeedinfoService;
 use App\Services\Collab\TagService;
 use App\Services\Collab\WatchService;
+use App\Services\IssueCloseListService;
 use App\Services\IssueCloseService;
+use App\Services\IssueDispatchService;
 use App\Services\IssueService;
 use App\Services\IssueTrashService;
 use App\Services\Meeting\MeetingService;
@@ -35,6 +37,8 @@ class PmQueryService
         private DependencyService $deps,
         private IssueCloseService $close,
         private IssueTrashService $trash,
+        private IssueCloseListService $closeList,
+        private IssueDispatchService $dispatch,
     ) {}
 
     /** @param array{only_action?:bool,tq?:string,ni?:string,stage?:string,status?:string,origin?:string,q?:string,sort?:string,tags?:array} $f */
@@ -42,20 +46,34 @@ class PmQueryService
     {
         $open = $this->wf->codesForTab($this->wf->ticketScope(null));
         $scope = $f['tt'] ?? null;
-        $issueStatuses = $this->wf->statusMap('issue');
         $approve = $this->wf->can($u, 'due.approve', $projectId);
         $onlyAction = (bool) ($f['only_action'] ?? true) && $this->wf->isDefaultTicketScope($scope);
         $tickets = $this->repo->pmTickets($projectId, $this->wf->ticketScopeCodes($scope), $onlyAction, $f['tq'] ?? null, $this->ticketIdFilter($projectId, $f));
-        $issues = $this->issues->paginate($projectId, $this->issueFilters($f));
-        $issueIds = collect($issues->items())->pluck('id')->all();
-
-        return [
+        $common = [
             'tickets' => $tickets,
             'counters' => $this->repo->ticketCounters($projectId, $open) + $this->needinfo->counts($projectId),
             'ticketScope' => $this->wf->ticketScope($scope),
             'ticketScopes' => $this->wf->lookupMap('client_tab'),
             'onlyActionApplies' => $this->wf->isDefaultTicketScope($scope),
             'needinfoStates' => $this->needinfo->states(collect($tickets->items())->pluck('id')->all()),
+            'dueRequests' => $approve ? $this->issues->pendingDueRequests($projectId) : collect(),
+            'can' => [
+                'create' => $this->wf->can($u, 'issue.create', $projectId) && $this->wf->can($u, 'issue.edit_pm', $projectId),
+                'approve' => $approve,
+                'delete' => $this->trash->canDeleteSome($u, $projectId),
+            ],
+        ];
+        if (($f['itab'] ?? '') === 'close') {
+            $filters = $this->closeFilters($f);
+
+            return $common + ['closeFilters' => $filters] + $this->closeList->page($u, $projectId, $filters, IssueCloseListService::PM);
+        }
+        $issueStatuses = $this->wf->statusMap('issue');
+        $issues = $this->issues->paginate($projectId, $this->issueFilters($f));
+        $issueIds = $issues->getCollection()->pluck('id')->all();
+
+        return $common + [
+            'timeline' => $this->dispatch->pmTimeline($projectId, $issues->getCollection()),
             'issues' => $issues,
             'issueTags' => $this->tags->ofMany($issueIds),
             'tagLabels' => $this->tags->labels(),
@@ -66,13 +84,12 @@ class PmQueryService
             'origins' => $this->wf->lookups('issue_initial')->pluck('code'),
             'originLabels' => $this->wf->lookupMap('issue_origin'),
             'externalOrigins' => $this->wf->lookupCodes('issue_origin_external'),
-            'dueRequests' => $approve ? $this->issues->pendingDueRequests($projectId) : collect(),
-            'can' => [
-                'create' => $this->wf->can($u, 'issue.create', $projectId) && $this->wf->can($u, 'issue.edit_pm', $projectId),
-                'approve' => $approve,
-                'delete' => $this->trash->canDeleteSome($u, $projectId),
-            ],
         ];
+    }
+
+    public function closeFilters(array $f): array
+    {
+        return $this->closeList->filters(['status' => $f['close_status'] ?? null, 'mine' => $f['close_mine'] ?? false, 'q' => $f['close_q'] ?? '']);
     }
 
     /**

@@ -9,11 +9,21 @@ use Illuminate\Support\Collection;
 
 class IssueCloseListService
 {
+    public const PM = 'pm';
+
+    public const DEV = 'dev';
+
+    public const TEST = 'test';
+
     public function __construct(private IssueCloseRepository $closeTasks, private WorkflowService $wf, private IssueDispatchService $dispatch) {}
 
-    public function columns(bool $testing): array
+    public function columns(string $audience): array
     {
-        $dispatch = $testing ? IssueDispatchService::TEST_COLUMNS : ['dispatched_at' => IssueDispatchService::DEV_LABEL];
+        $dispatch = match ($audience) {
+            self::PM => IssueDispatchService::PM_COLUMNS,
+            self::TEST => IssueDispatchService::TEST_COLUMNS,
+            self::DEV => ['dispatched_at' => IssueDispatchService::DEV_LABEL],
+        };
 
         return ['issue_no' => '單號', 'title' => '標題'] + $dispatch + [
             'round' => '輪次', 'target' => '結案方式', 'requested_at' => '送出結案時間',
@@ -30,12 +40,12 @@ class IssueCloseListService
             'q' => is_string($in['q'] ?? null) ? trim($in['q']) : '', 'overdue' => false, 'f' => null];
     }
 
-    public function page(User $user, int $pid, array $filters, bool $testing): array
+    public function page(User $user, int $pid, array $filters, string $audience): array
     {
         return [
             'statusOptions' => $this->statuses(),
-            'rounds' => $this->rows($user, $pid, $filters, $testing),
-            'closeColumns' => $this->columns($testing),
+            'rounds' => $this->rows($user, $pid, $filters, $audience),
+            'closeColumns' => $this->columns($audience),
         ];
     }
 
@@ -46,14 +56,16 @@ class IssueCloseListService
     }
 
     /** Same round filters, order and displayed values for HTML and Excel. */
-    public function rows(User $u, int $pid, array $fl, bool $testing, ?int $limit = null): Collection|LengthAwarePaginator
+    public function rows(User $u, int $pid, array $fl, string $audience, ?int $limit = null): Collection|LengthAwarePaginator
     {
         $result = $this->closeTasks->rounds($pid, $fl['status'] === 'all' ? null : $fl['status'], $fl['q'],
-            $fl['mine'] ? $u->id : null, (bool) $u->is_admin, $fl['mine'] && $this->wf->can($u, 'release.manage', $pid), $limit);
+            $fl['mine'] ? $u->id : null, (bool) $u->is_admin, $fl['mine'] && $this->wf->can($u, 'release.manage', $pid), $limit, $audience === self::PM ? 'close_page' : 'page');
         $rows = $result instanceof LengthAwarePaginator ? $result->getCollection() : $result;
-        $dispatches = $testing
-            ? $this->dispatch->test($pid, $rows->pluck('request_event_id')->all(), atClose: true)
-            : $this->dispatch->devTimes($pid, $rows->pluck('issue_id')->unique()->values()->all());
+        $dispatches = match ($audience) {
+            self::PM => $this->dispatch->pmTimeline($pid, $rows, atClose: true),
+            self::TEST => $this->dispatch->test($pid, $rows->pluck('request_event_id')->all(), atClose: true),
+            self::DEV => $this->dispatch->devTimes($pid, $rows->pluck('issue_id')->unique()->values()->all()),
+        };
         $roles = $this->wf->lookupMapAll('issue_close_role');
         $statuses = $this->statuses();
         $pending = $this->closeTasks->pendingOwners($rows->where('round_status', 'pending')->pluck('issue_id')->all())
@@ -65,8 +77,11 @@ class IssueCloseListService
             'target' => $this->wf->label('issue', $r->target), 'requested_at' => tw($r->requested_at),
             'status' => $statuses[$r->round_status], 'progress' => $r->done_count.'／'.$r->total,
             'pending' => $pending[$r->issue_id.'-'.$r->round] ?? '—',
-        ] + ($testing ? ($dispatches[$r->request_event_id] ?? IssueDispatchService::NO_TEST_DISPATCH)
-            : ['dispatched_at' => $dispatches[$r->issue_id] ?? '—']));
+        ] + match ($audience) {
+            self::PM => $dispatches[$r->request_event_id],
+            self::TEST => $dispatches[$r->request_event_id] ?? IssueDispatchService::NO_TEST_DISPATCH,
+            self::DEV => ['dispatched_at' => $dispatches[$r->issue_id] ?? '—'],
+        });
 
         return $result;
     }

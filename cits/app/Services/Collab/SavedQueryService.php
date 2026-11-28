@@ -18,7 +18,7 @@ class SavedQueryService
 {
     /** scope => [route name, permission, internal side only, allowed query keys] */
     private const SCOPES = [
-        'pm' => ['pm.index', 'issue.view', true, ['oa', 'tt', 'tq', 'stage', 'status', 'origin', 'q', 'sort', 'tags', 'ni']],
+        'pm' => ['pm.index', 'issue.view', true, ['oa', 'tt', 'tq', 'stage', 'status', 'origin', 'q', 'sort', 'tags', 'ni', 'itab', 'close_status', 'close_mine', 'close_q']],
         'dev' => ['dev.index', 'issue.view', true, ['tab', 'f', 'mine', 'status', 'overdue', 'q']],
         'test' => ['test.index', 'issue.view', true, ['tab', 'mine', 'status', 'q']],
         'client' => ['tickets.index', 'ticket.view', false, ['tab', 'type', 'q', 'sort', 'dir', 'mine', 'ni']],

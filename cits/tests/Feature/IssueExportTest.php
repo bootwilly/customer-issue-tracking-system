@@ -8,8 +8,10 @@ use App\Models\LookupItem;
 use App\Models\Meeting;
 use App\Models\Project;
 use App\Models\User;
+use App\Repositories\EventRepository;
 use App\Repositories\IssueRepository;
 use App\Repositories\SettingRepository;
+use App\Services\Collab\SavedQueryService;
 use App\Services\Dev\DevService;
 use App\Services\Export\IssueExportService;
 use App\Services\IssueCloseService;
@@ -124,6 +126,75 @@ it('exports exactly the rows the pm issue list shows', function () {
     }
 });
 
+it('shows PM issue creation and handoff times in Taipei and exports the active PM filters', function () {
+    $pid = $this->p->id;
+    $svc = app(IssueService::class);
+    $time = now('UTC')->setDateTime(2026, 10, 4, 19, 15);
+    $this->travelTo($time);
+    $issue = ieIssue($this->pm, $this->p, 'pm', ['title' => '派工追蹤']);
+    $direct = ieIssue($this->pm, $this->p, 'pm');
+    $found = ieIssue($this->tester, $this->p, 'test', ['assignee_dev_id' => $this->dev->id]);
+    $this->travelTo($time->copy()->addMinutes(10));
+    $svc->transition($this->pm, $issue->id, $pid, 'dev_todo', ['assignee_dev_id' => $this->dev->id]);
+    $svc->transition($this->pm, $direct->id, $pid, 'test_pending', ['assignee_test_id' => $this->tester->id]);
+    $this->travelTo($time->copy()->addMinutes(20));
+    $svc->transition($this->dev, $issue->id, $pid, 'dev_doing', ['planned_due' => '2026-10-06']);
+    $svc->transition($this->dev, $issue->id, $pid, 'test_pending', ['assignee_test_id' => $this->tester->id], '送測');
+    foreach (['保留客戶單', '其他客戶單'] as $title) {
+        app(TicketService::class)->create($this->client, $pid, ['title' => $title, 'ticket_type' => 'bug', 'content_html' => '<p>x</p>']);
+    }
+    $params = ['tq' => '保留客戶', 'close_q' => '無關'];
+    $page = ($this->as)($this->pm)->get(route('pm.index', $params))->assertOk()
+        ->assertSee('開單時間')->assertSee('2026-10-05 03:15')->assertSee('2026-10-05 03:25')->assertSee('2026-10-05 03:35')
+        ->assertSee('（開發）')->assertSee('（PM）')->assertSee('保留客戶單')->assertDontSee('其他客戶單');
+    $timeline = $page->viewData('timeline');
+    expect($timeline[$found->id])->toMatchArray(['dev_dispatched_at' => '—', 'test_dispatched_at' => '—'])
+        ->and($timeline[$direct->id])->toMatchArray(['dev_dispatched_at' => '—', 'dispatch_source' => 'PM'])
+        ->and($timeline[$issue->id])->toBe(['created_at' => '2026-10-05 03:15', 'dev_dispatched_at' => '2026-10-05 03:25',
+            'test_dispatched_at' => '2026-10-05 03:35', 'dispatch_source' => '開發']);
+    $download = ($this->as)($this->pm)->get(route('pm.export', $params + ['q' => $issue->title]))->assertOk();
+    expect(ieText(ieXml($download, 'xl/worksheets/sheet1.xml')))->toContain('保留客戶單')->not->toContain('其他客戶單')
+        ->and(ieText(ieXml($download, 'xl/worksheets/sheet3.xml')))->toContain('開單時間', '首次派開發', '最近派測試', '派測來源', ...array_values($timeline[$issue->id]))
+        ->not->toContain($direct->issue_no, $found->issue_no);
+});
+
+it('preserves both PM handoffs as of each close request including same-second events', function () {
+    $this->freezeTime();
+    $pid = $this->p->id;
+    $issue = ieIssue($this->dev, $this->p, 'dev', ['assignee_dev_id' => $this->dev->id]);
+    $close = app(IssueCloseService::class);
+    $close->request($this->pm, $pid, $issue->id, 'closed_pm', '一', null);
+    $close->withdraw($this->pm, $pid, $issue->id);
+    // Same-second historical dispatch recorded after the first round.
+    app(EventRepository::class)->log($pid, 'issue', $issue->id, 'status', 'new', 'dev_todo', $this->pm->id);
+    $svc = app(IssueService::class);
+    $svc->transition($this->dev, $issue->id, $pid, 'dev_doing', ['planned_due' => now()->addDay()->toDateString()]);
+    $svc->transition($this->dev, $issue->id, $pid, 'test_pending', ['assignee_test_id' => $this->tester->id], '送測');
+    $close->request($this->pm, $pid, $issue->id, 'closed_pm', '二', null);
+    $params = ['itab' => 'close', 'close_status' => 'all', 'close_q' => $issue->issue_no, 'q' => '無關'];
+    $page = ($this->as)($this->pm)->get(route('pm.index', $params))->assertOk()
+        ->assertSee('客戶問題')->assertSee('已撤回')->assertSee(route('issues.show', $issue).'#close-tasks')->assertDontSee('data-meet-all class=', false);
+    [$first, $second] = $page->viewData('rounds')->items();
+    expect($first)->toMatchArray(['round' => 1, 'created_at' => tw(now()), 'dev_dispatched_at' => '—', 'test_dispatched_at' => '—', 'dispatch_source' => '—'])
+        ->and($second)->toMatchArray(['round' => 2, 'dev_dispatched_at' => tw(now()), 'test_dispatched_at' => tw(now()), 'dispatch_source' => '開發']);
+    $sheet = $this->svc->pmIssuesSheet($this->pm, $pid, $params);
+    foreach ($page->viewData('rounds') as $index => $row) {
+        foreach ($sheet->columns as $key => $label) {
+            $cell = $sheet->rows[$index][$key];
+            expect($key === 'issue_no' ? $cell->text : $cell)->toBe($row[$key]);
+        }
+    }
+    $file = ($this->as)($this->pm)->get(route('pm.export', $params))->assertOk();
+    expect(ieXml($file, 'xl/workbook.xml'))->toContain('客戶單', '客戶單詳細', '結案收尾', '匯出資訊')->not->toContain('內部單詳細')
+        ->and(ieText(ieXml($file, 'xl/worksheets/sheet3.xml')))->toContain('首次派開發', '已撤回', '—', '開發')
+        ->and(ieXml($file, 'xl/worksheets/_rels/sheet3.xml.rels'))->toContain('#close-tasks')
+        ->and(ieText(ieXml($file, 'xl/worksheets/sheet4.xml')))->toContain('收尾狀態', '全部', $issue->issue_no)->not->toContain('無關');
+    $closePage = ($this->as)($this->pm)->get(route('pm.index', ['itab' => 'close']))->assertOk();
+    expect($closePage->viewData('rounds')->pluck('round')->all())->toBe([2]);
+    $saved = app(SavedQueryService::class)->save($this->pm, $pid, 'pm', '收尾', $params + ['close_mine' => '1', 'close_page' => '2']);
+    expect($saved->params)->toMatchArray($params + ['close_mine' => '1'])->not->toHaveKey('close_page');
+});
+
 it('adds the week column on the dev schedule export', function () {
     $tz = 'Asia/Taipei';
     ieIssue($this->dev, $this->p, 'dev', ['title' => '逾期單', 'assignee_dev_id' => $this->dev->id, 'current_due' => now($tz)->subDays(10)->toDateString()]);
@@ -228,14 +299,15 @@ it('scopes release pool rounds by permission and project and protects both manag
     $secondPm = ieUser('otherpm', 'internal', ['internal_pm'], $second);
     $foreign = ieIssue($secondPm, $second, 'pm', ['status' => 'release_pending']);
     $close->request($secondPm, $second->id, $foreign->id, 'closed_pm', '另一個專案', null);
-    $in = ['tab' => 'close', 'mine' => 1];
+    $tab = $scope === 'pm' ? ['itab' => 'close'] : ['tab' => 'close'];
+    $in = $tab + [$scope === 'pm' ? 'close_mine' : 'mine' => 1];
     $view = fn ($user, $filters) => ($this->as)($user)->get(route($scope.'.index', $filters))->assertOk()->viewData('rounds');
-    expect($view($this->dev, ['tab' => 'close', 'status' => 'all'])->pluck('issue_id')->all())->toBe([$pool->id])
+    expect($view($this->dev, $tab + [$scope === 'pm' ? 'close_status' : 'status' => 'all'])->pluck('issue_id')->all())->toBe([$pool->id])
         ->and($view($this->dev, $in)->total())->toBe(0)
         ->and($view($this->tester, $in)->getCollection()->sole()['pending'])->toBe('上線收尾 上線負責人');
     ($this->as)($this->client)->get(route($scope.'.index', $in))->assertForbidden();
     ($this->as)($this->client)->get(route($scope.'.export', $in))->assertForbidden();
-})->with(['dev', 'test']);
+})->with(['dev', 'test', 'pm']);
 
 it('exports all matching wrap-up pages in request order and enforces the export limit', function ($scope) {
     $pid = $this->p->id;
@@ -245,15 +317,20 @@ it('exports all matching wrap-up pages in request order and enforces the export 
         $close->request($this->pm, $pid, $issue->id, 'closed_pm', '驗證輪次', null);
         $close->withdraw($this->pm, $pid, $issue->id);
     }
-    $in = ['tab' => 'close', 'status' => 'void', 'q' => $issue->issue_no, 'page' => 2];
+    $in = $scope === 'pm' ? ['itab' => 'close', 'close_status' => 'void', 'close_q' => $issue->issue_no, 'close_page' => 2, 'page' => 7, 'tp' => 3]
+        : ['tab' => 'close', 'status' => 'void', 'q' => $issue->issue_no, 'page' => 2];
     $page = ($this->as)($this->dev)->get(route($scope.'.index', $in))->assertOk()->viewData('rounds');
     expect($page->total())->toBe(21)->and($page->pluck('round')->all())->toBe([21])
         ->and($page->previousPageUrl())->toContain('tab=close', 'status=void', 'q='.$issue->issue_no);
-    $book = $scope === 'dev' ? $this->svc->devBook($this->dev, $pid, $in) : $this->svc->testBook($this->tester, $pid, $in);
-    expect(array_column($book->sheets[0]->rows, 'round'))->toBe(range(1, 21));
+    $sheet = match ($scope) {
+        'pm' => $this->svc->pmIssuesSheet($this->pm, $pid, $in),
+        'dev' => $this->svc->devBook($this->dev, $pid, $in)->sheets[0],
+        'test' => $this->svc->testBook($this->tester, $pid, $in)->sheets[0],
+    };
+    expect(array_column($sheet->rows, 'round'))->toBe(range(1, 21));
     app(SettingRepository::class)->set('export.max_rows', '20');
     ($this->as)($this->dev)->get(route($scope.'.export', $in))->assertRedirect(route($scope.'.index', $in))->assertSessionHas('err');
-})->with(['dev', 'test']);
+})->with(['dev', 'test', 'pm']);
 
 it('shows the latest test handoff in the list, Excel and each historical close round', function ($from) {
     $pid = $this->p->id;
