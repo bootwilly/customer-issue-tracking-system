@@ -14,7 +14,7 @@
     $can = fn ($f) => in_array($f, $editable, true);
     $fieldLabels = [
         'assignee_dev_id' => '指派 DEV', 'assignee_test_id' => '指派 Test', 'planned_due' => '預計完工日', 'package_id' => '更新包',
-        'test_scheduled_at' => '排程測試日', 'release_planned_at' => '預計更新正式環境日', 'cancel_reason' => '原因', 'client_note' => '給客戶的說明',
+        'test_scheduled_at' => '排程測試日', 'release_planned_at' => '預計更新正式環境日', 'close_reason' => '結案原因', 'cancel_reason' => '原因', 'client_note' => '給客戶的說明',
     ];
 @endphp
 @section('content')
@@ -34,6 +34,32 @@
         @endif
     </div>
 
+    @if ($issue->close_target || $closeTasks->isNotEmpty())
+        <section id="close-tasks" class="{{ $card }} mb-4 space-y-2">
+            <h2 class="font-semibold">{{ $issue->close_target ? '結案收尾中' : '收尾紀錄' }}</h2>
+            @if ($issue->close_target)<p>{{ $closeLabel }} · {{ $issue->close_reason }}</p>@endif
+            @if ($issue->closeMeetingItem)
+                <a class="text-indigo-700 underline" href="{{ route('meetings.show', $issue->closeMeetingItem->meeting_id) }}#item-{{ $issue->close_meeting_item_id }}">來源會議事項</a>
+            @endif
+            @foreach ($closeTasks as $task)
+                <div class="border-t pt-2 text-sm">
+                    第 {{ $task->round }} 輪 · {{ $closeRoleLabels[$task->role] }} · {{ $task->user?->name ?? '上線負責人' }} · {{ $closeTaskLabels[$task->status] }}
+                    @if ($task->done_at)<p>{{ $task->doneBy?->name }} · {{ tw($task->done_at) }} · {{ $task->note }}</p>@endif
+                    @if (in_array($task->id, $ownCloseTasks, true))
+                        <form method="POST" action="{{ route('issues.close-tasks.finish', [$issue->id, $task->id]) }}">@csrf
+                            <label>收尾說明<textarea name="note" rows="2" maxlength="1000" required class="{{ $input }}"></textarea></label>
+                            <button class="{{ $btn }} bg-indigo-600">確認收尾</button>
+                        </form>
+                    @endif
+                </div>
+            @endforeach
+            @if ($canWithdraw)
+                <form method="POST" action="{{ route('issues.close.withdraw', $issue->id) }}" onsubmit="return confirm('撤回結案並恢復原狀態？')">@csrf
+                    <button class="{{ $btn }} bg-amber-700">撤回結案</button>
+                </form>
+            @endif
+        </section>
+    @endif
     <section class="{{ $card }} mb-4">
         <dl class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm md:grid-cols-4">
             <div><dt class="text-xs text-slate-500">來源</dt><dd>{{ $originLabels[$issue->origin] ?? $issue->origin }}</dd></div>
@@ -55,6 +81,10 @@
             <div class="col-span-2 md:col-span-4"><dt class="text-xs text-slate-500">客戶單</dt>
                 <dd>@forelse ($issue->tickets as $t)<a href="{{ route('pm.tickets.show', $t->id) }}" class="mr-3 text-indigo-700 hover:underline">{{ $t->ticket_no }}</a>@empty - @endforelse</dd></div>
             @if ($issue->dev_note)<div class="col-span-2 md:col-span-4"><dt class="text-xs text-slate-500">DEV 備註</dt><dd class="whitespace-pre-line">{{ $issue->dev_note }}</dd></div>@endif
+            @if ($issue->closed_at)
+                <div class="col-span-2"><dt>結案原因</dt><dd class="whitespace-pre-line">{{ $issue->close_reason }}</dd></div>
+                <div class="col-span-2"><dt>結案方式／時間</dt><dd>{{ $closeLabel }} · {{ tw($issue->closed_at) }}</dd></div>
+            @endif
             @if ($issue->cancel_reason)<div class="col-span-2 md:col-span-4"><dt class="text-xs text-slate-500">取消／不處理原因</dt><dd>{{ $issue->cancel_reason }}</dd></div>@endif
         </dl>
     </section>
@@ -130,6 +160,7 @@
 
         <aside class="space-y-4">
             {{-- 狀態變更 --}}
+            @unless ($issue->close_target)
             <section class="{{ $card }}">
                 <h2 class="mb-2 text-base font-semibold">狀態變更</h2>
                 @forelse ($targets as $t)
@@ -138,6 +169,7 @@
                         <form method="POST" action="{{ route('issues.transition', $issue->id) }}" class="space-y-2 border-t border-slate-100 p-3">@csrf
                             <input type="hidden" name="to" value="{{ $t['code'] }}">
                             @foreach ($t['fields'] as $f)
+                                @continue($f === 'client_note' && ! $linked && in_array('close_reason', $t['fields'], true))
                                 <div>
                                     <label class="text-xs text-slate-500">{{ $fieldLabels[$f] ?? $f }}</label>
                                     @switch($f)
@@ -161,6 +193,10 @@
                                         @case('release_planned_at')
                                             <input type="date" name="{{ $f }}" required class="{{ $input }}">
                                             @break
+                                        @case('close_reason')
+                                            <textarea name="close_reason" rows="2" maxlength="1000" required class="{{ $input }}">{{ old('close_reason') }}</textarea>
+                                            <p class="text-xs text-slate-600">{{ $closePreview }}</p>
+                                            @break
                                         @case('client_note')
                                             <textarea name="client_note" rows="2" maxlength="500" class="{{ $input }}" @if ($linked) required @endif></textarea>
                                             @if ($linked)<p class="mt-0.5 text-xs text-amber-700">此單已連結客戶單，請填寫給客戶看的說明。</p>@endif
@@ -177,6 +213,7 @@
                     <p class="text-sm text-slate-400">目前沒有可執行的狀態變更</p>
                 @endforelse
             </section>
+            @endunless
 
             {{-- 預計完工 --}}
             @if ($ab['set_due'])

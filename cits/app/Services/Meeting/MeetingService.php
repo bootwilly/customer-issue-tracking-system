@@ -16,6 +16,7 @@ use App\Repositories\UnitOfWork;
 use App\Services\AttachmentService;
 use App\Services\Collab\WatchService;
 use App\Services\ContentService;
+use App\Services\IssueCloseService;
 use App\Services\IssueService;
 use App\Services\WorkflowService;
 use Carbon\CarbonImmutable;
@@ -55,6 +56,7 @@ class MeetingService
         private UnitOfWork $uow,
         private WatchService $watch,
         private AttachmentService $files,
+        private IssueCloseService $close,
         private IssueService $issues,
     ) {}
 
@@ -816,6 +818,54 @@ class MeetingService
         $this->assertEdit($u, $m);
 
         return $m;
+    }
+
+    public function closeOptions(User $u, int $pid, ?MeetingItem $item): array
+    {
+        if (! $u->seesInternal()) {
+            return [];
+        }
+        $issue = $item?->issue;
+        $can = $issue && $this->close->mayRequest($u, $pid) && ! $this->issueClosed($item) && $issue->close_target === null;
+
+        return [
+            'can_close_issue' => $can,
+            'issue_closing' => $issue?->close_target !== null,
+            'needs_client_note' => $can && $issue->tickets_count > 0,
+            'close_wrapup' => $can ? $this->close->preview($issue) : '',
+        ];
+    }
+
+    public function closeIssue(User $u, int $pid, int $id, int $itemId, ?string $clientNote): MeetingItem
+    {
+        return $this->uow->run(function () use ($u, $pid, $id, $itemId, $clientNote) {
+            $this->repo->findForUpdate($id);
+            $m = $this->editableMeeting($u, $pid, $id);
+            if (! $this->close->mayRequest($u, $pid)) {
+                throw new BusinessException('沒有權限執行此操作。');
+            }
+            $this->repo->lockItem($id, $itemId);
+            $item = $this->findItem($m, $itemId);
+            if (! $item->issue_id || $this->issueTrashed($item)) {
+                throw new BusinessException('請先連結有效的內部單。');
+            }
+            if (trim((string) $item->conclusion) === '') {
+                throw new BusinessException('請先填寫結論再結案');
+            }
+            $issue = $this->close->request($u, $pid, $item->issue_id, $this->close->meetingTarget(), $item->conclusion, $clientNote, $itemId);
+            $this->events->log($pid, 'issue', $issue->id, 'closed_by_meeting', null, null, $u->id,
+                ['meeting' => $m->title, 'meeting_id' => $id, 'item_id' => $itemId]);
+
+            $done = $this->wf->allowedTargets(self::ITEM_SCOPE, $item->status, $u, $pid)
+                ->first(fn ($t) => $this->wf->status(self::ITEM_SCOPE, $t['code'])->is_terminal);
+            if ($done) {
+                $this->wf->assertTransition(self::ITEM_SCOPE, $item->status, $done['code'], $u, $pid);
+                $this->repo->saveItem($item, ['status' => $done['code'], 'updated_by' => $u->id]);
+            }
+            $this->itemChanged($u, $m, $item->topic);
+
+            return $this->findItem($m, $itemId);
+        });
     }
 
     private function findItem(Meeting $m, int $itemId): MeetingItem

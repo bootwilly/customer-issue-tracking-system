@@ -33,6 +33,9 @@
                         <span class="ml-auto">@include('collab._watch', ['action' => route('collab.tickets.watch', $ticket->id), 'watching' => $watching])</span>
                     </div>
                     <h1 class="mt-2 text-xl font-semibold">{{ $ticket->title }}</h1>
+                    @foreach ($clientNotes as $note)
+                        <p class="my-2 whitespace-pre-line text-sm"><strong>處理說明</strong>　{{ $note }}</p>
+                    @endforeach
                     @if ($progress)
                         <div class="mt-3">
                             <div class="mb-1 text-xs text-slate-400">處理進度@if ($progress['eta'])<span class="ml-2 text-slate-500">預計 {{ $progress['eta'] }} 更新正式環境</span>@endif</div>

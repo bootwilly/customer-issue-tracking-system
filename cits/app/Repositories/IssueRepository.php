@@ -89,6 +89,7 @@ class IssueRepository
     /** Permanent delete: every row that references the issue, then the issue (meeting_items.issue_id is set null by its FK). */
     public function purge(Issue $i): void
     {
+        $i->closeTasks()->delete();
         IssueAddendum::where('issue_id', $i->id)->delete(); // before comments: an addendum may quote a comment
         IssueComment::where('issue_id', $i->id)->delete();
         DueChangeRequest::where('issue_id', $i->id)->delete();
@@ -157,7 +158,9 @@ class IssueRepository
     /** @return Collection<int, Issue> */
     public function issuesOfTicket(int $ticketId): Collection
     {
-        return Issue::whereHas('tickets', fn ($q) => $q->where('client_tickets.id', $ticketId))->orderBy('id')->get();
+        // A second issue can finish while this transaction waits for the same ticket.
+        // Read the current committed issue states after acquiring the ticket lock.
+        return Issue::whereHas('tickets', fn ($q) => $q->where('client_tickets.id', $ticketId))->orderBy('id')->sharedLock()->get();
     }
 
     public function addComment(int $issueId, string $html, int $userId): IssueComment
@@ -180,6 +183,12 @@ class IssueRepository
                 ->whereHas('issues', fn ($q) => $q->where('issues.id', $issueId)))
             ->with('author')
             ->first();
+    }
+
+    public function rejectPendingDue(int $issueId, int $reviewer): int
+    {
+        return DueChangeRequest::where('issue_id', $issueId)->where('status', 'pending')
+            ->update(['status' => 'rejected', 'reviewed_by' => $reviewer, 'reviewed_at' => now()]);
     }
 
     public function createDueRequest(array $data): DueChangeRequest

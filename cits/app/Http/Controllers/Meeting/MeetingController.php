@@ -148,7 +148,7 @@ class MeetingController extends Controller
         return redirect()->route('meetings.show', $m->id)->with('ok', '已建立會議。');
     }
 
-    public function show(Request $r, int $id)
+    public function show(Request $r, int $id, WorkflowService $wf)
     {
         $pid = $this->viewer($r);
         $u = $r->user();
@@ -179,6 +179,7 @@ class MeetingController extends Controller
             'canEdit' => $canEdit,
             'canShare' => $this->svc->canToggleShare($u, $m),
             'canPickIssues' => $this->svc->canPickIssues($u, $m),
+            'canRequestClose' => $canEdit && $u->seesInternal() && $wf->can($u, 'issue.close', $pid),
             'canConvert' => $this->svc->canConvert($u, $m),
             'issueStages' => $this->svc->issueStages(),
             'canComment' => $this->svc->canComment($u, $m),
@@ -408,7 +409,7 @@ class MeetingController extends Controller
         // internal issue numbers never reach clients (the page hides them the same way, MeetingService::items)
         $issue = $r->user()->seesInternal() ? $i->issue : null;
 
-        return [
+        return $this->svc->closeOptions($r->user(), (int) $this->project->id(), $i) + [
             'id' => $i->id, 'topic' => $i->topic, 'discussion' => $i->discussion, 'conclusion' => $i->conclusion,
             'owner_id' => $i->owner_id, 'due_date' => $i->due_date?->format('Y-m-d'), 'status' => $i->status,
             'issue_no' => $issue?->issue_no, 'issue_url' => $issue ? route('issues.show', $issue->id) : null,
@@ -437,6 +438,14 @@ class MeetingController extends Controller
         $d = $r->validate($this->itemRules());
 
         return $this->itemResult($r, $id, fn () => $this->svc->addItem($r->user(), $pid, $id, $d), '已新增討論事項。');
+    }
+
+    public function closeIssue(Request $r, int $id, int $item)
+    {
+        $pid = $this->viewer($r);
+        $d = $r->validate(['client_note' => 'nullable|string|max:500']);
+
+        return $this->itemResult($r, $id, fn () => $this->svc->closeIssue($r->user(), $pid, $id, $item, $d['client_note'] ?? null), '已送出會議結案。');
     }
 
     public function updateItem(Request $r, int $id, int $item)

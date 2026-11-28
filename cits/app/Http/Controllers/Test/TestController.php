@@ -6,6 +6,7 @@ use App\Exceptions\BusinessException;
 use App\Http\Controllers\Controller;
 use App\Services\Export\IssueExportService;
 use App\Services\Export\XlsxExportService;
+use App\Services\IssueCloseService;
 use App\Services\Test\TestService;
 use App\Support\CurrentProject;
 use Illuminate\Http\Request;
@@ -22,11 +23,11 @@ class TestController extends Controller
         return $pid;
     }
 
-    public function index(Request $r)
+    public function index(Request $r, IssueCloseService $close)
     {
         $pid = $this->guard($r);
 
-        return view('test.index', $this->svc->index($r->user(), $pid, $r->query()) + ['canExport' => $this->export->canExport($r->user(), $pid)]);
+        return view('test.index', $this->svc->index($r->user(), $pid, $r->query()) + ['pendingClose' => $close->pendingFor($r->user(), $pid), 'canExport' => $this->export->canExport($r->user(), $pid)]);
     }
 
     public function export(Request $r)

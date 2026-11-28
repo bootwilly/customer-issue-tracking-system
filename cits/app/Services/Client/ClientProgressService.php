@@ -63,7 +63,7 @@ class ClientProgressService
         } else {
             $best = null;
             foreach ($rows as $r) {
-                $st = $issueStatus->get($r->status);
+                $st = $issueStatus->get($r->close_from ?? $r->status);
                 if (! $st || $st->is_excluded) {
                     continue; // cancelled / won't fix issues do not drive client progress
                 }
@@ -71,7 +71,7 @@ class ClientProgressService
                 if ($idx !== false && ($best === null || $idx < $best)) {
                     $best = $idx; // slowest linked issue decides
                 }
-                if (! $st->is_released && $r->release_planned_at) {
+                if (! $st->is_terminal && $r->release_planned_at) {
                     $eta = max($eta ?? '', substr((string) $r->release_planned_at, 0, 10));
                 }
             }

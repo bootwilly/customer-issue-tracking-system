@@ -195,7 +195,7 @@ class WorkflowService
     }
 
     /** Field-level edit rule check (field_edit_rules). */
-    public function canEditField(User $user, string $field, string $origin, string $stage, int $creatorId, int $projectId): bool
+    public function canEditField(User $user, string $field, string $origin, ?string $stage, int $creatorId, int $projectId): bool
     {
         if ($user->is_admin) {
             return true;

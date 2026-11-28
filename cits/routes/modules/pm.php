@@ -34,6 +34,8 @@ Route::middleware(['web', 'auth', 'active', 'project'])->group(function () {
 
     Route::get('/issues/{id}', [IssueController::class, 'show'])->whereNumber('id')->name('issues.show');
     Route::delete('/issues/{id}', [IssueController::class, 'destroy'])->whereNumber('id')->name('issues.destroy');
+    Route::post('/issues/{id}/close-tasks/{task}', [IssueController::class, 'finishCloseTask'])->whereNumber(['id', 'task'])->name('issues.close-tasks.finish');
+    Route::post('/issues/{id}/close/withdraw', [IssueController::class, 'withdrawClose'])->whereNumber('id')->name('issues.close.withdraw');
     Route::post('/issues/{id}/transition', [IssueController::class, 'transition'])->whereNumber('id')->name('issues.transition');
     Route::post('/issues/{id}/fields', [IssueController::class, 'fields'])->whereNumber('id')->name('issues.fields');
     Route::post('/issues/{id}/due', [IssueController::class, 'setDue'])->whereNumber('id')->name('issues.due');

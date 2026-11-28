@@ -5,9 +5,9 @@ namespace App\Http\Controllers\Client;
 use App\Exceptions\BusinessException;
 use App\Http\Controllers\Controller;
 use App\Services\Client\ClientProgressService;
+use App\Services\Client\ClientQueryService;
 use App\Services\Collab\NeedinfoService;
 use App\Services\Collab\WatchService;
-use App\Services\Client\ClientQueryService;
 use App\Services\Export\TicketExportService;
 use App\Services\Export\XlsxExportService;
 use App\Services\TicketService;
@@ -140,6 +140,7 @@ class TicketController extends Controller
 
         return view('client.show', [
             'ticket' => $d['ticket'],
+            'clientNotes' => $d['clientNotes'],
             'readers' => $d['readers'],
             'abilities' => $this->tickets->abilities($t, $u),
             'timeline' => $this->tickets->timeline($t),

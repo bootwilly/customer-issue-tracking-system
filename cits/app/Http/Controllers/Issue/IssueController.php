@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Issue;
 use App\Exceptions\BusinessException;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Pm\Concerns\GuardsInternal;
+use App\Services\IssueCloseService;
 use App\Services\IssueService;
 use App\Services\IssueTrashService;
 use App\Services\Pm\PmQueryService;
@@ -14,7 +15,7 @@ class IssueController extends Controller
 {
     use GuardsInternal;
 
-    public function __construct(private IssueService $issues, private PmQueryService $q, private IssueTrashService $trash) {}
+    public function __construct(private IssueCloseService $close, private IssueService $issues, private PmQueryService $q, private IssueTrashService $trash) {}
 
     public function show(Request $request, int $id)
     {
@@ -72,13 +73,34 @@ class IssueController extends Controller
             'assignee_dev_id' => 'nullable|integer', 'assignee_test_id' => 'nullable|integer',
             'planned_due' => 'nullable|date', 'test_scheduled_at' => 'nullable|date', 'release_planned_at' => 'nullable|date',
             'package_id' => 'nullable|integer', 'new_package_name' => 'nullable|string|max:150',
+            'close_reason' => 'nullable|string|max:1000',
             'cancel_reason' => 'nullable|string|max:500', 'client_note' => 'nullable|string|max:500',
         ]);
 
         return $this->act(function () use ($u, $id, $in) {
             $data = $this->q->transitionInput($id, $this->pid(), $u, $in['to'], $in);
+            if ($this->close->resolved($in['to'])) {
+                $this->close->request($u, $this->pid(), $id, $in['to'], $data['close_reason'] ?? '', $data['client_note'] ?? null);
+
+                return;
+            }
             $this->issues->transition($u, $id, $this->pid(), $in['to'], $data, $in['new_package_name'] ?? null);
         }, '狀態已更新。');
+    }
+
+    public function finishCloseTask(Request $request, int $id, int $task)
+    {
+        $u = $this->guard($request, 'issue.view');
+        $d = $request->validate(['note' => 'required|string|max:1000']);
+
+        return $this->act(fn () => $this->close->finishTask($u, $this->pid(), $task, $d['note'], $id), '已確認收尾。');
+    }
+
+    public function withdrawClose(Request $request, int $id)
+    {
+        $u = $this->guard($request, 'issue.close');
+
+        return $this->act(fn () => $this->close->withdraw($u, $this->pid(), $id), '已撤回結案。');
     }
 
     public function fields(Request $request, int $id)

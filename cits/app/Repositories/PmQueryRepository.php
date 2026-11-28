@@ -114,7 +114,7 @@ class PmQueryRepository
     {
         return Issue::with([
             'creator:id,name', 'dev:id,name', 'tester:id,name', 'mesPage:id,name', 'package:id,name',
-            'tickets:id,ticket_no,title', 'addenda.author:id,name', 'comments.author:id,name', 'dueRequests.requester:id,name',
+            'closeMeetingItem:id,meeting_id', 'tickets:id,ticket_no,title', 'addenda.author:id,name', 'comments.author:id,name', 'dueRequests.requester:id,name',
         ])->find($id);
     }
 

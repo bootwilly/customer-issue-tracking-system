@@ -177,6 +177,13 @@ function init(list) {
             if (item.issue_url) link.href = item.issue_url;
             link.textContent = item.issue_url ? item.issue_label || `開啟 ${item.issue_no}` : '';
         }
+        row.querySelector('[data-issue-closing]')?.classList.toggle('hidden', !item.issue_closing);
+        const close = row.querySelector('[data-close-issue]');
+        if (close) {
+            close.classList.toggle('hidden', !item.can_close_issue);
+            close.dataset.needsNote = item.needs_client_note ? '1' : '0';
+            close.dataset.wrapup = item.close_wrapup;
+        }
         row.querySelector('[data-issue-closed]')?.classList.toggle('hidden', !item.issue_closed);
         row.querySelector('[data-issue-trashed]')?.classList.toggle('hidden', !item.issue_trashed);
         const convert = row.querySelector('[data-issue-convert]');
@@ -192,6 +199,7 @@ function init(list) {
     function bind(row) {
         const pending = {};
         let timer = null;
+        let saveFailed = false;
         let busy = Promise.resolve();
 
         const value = (el) => el.value;
@@ -215,9 +223,12 @@ function init(list) {
                         row.dataset.itemId = data.item.id;
                         row.id = `item-${data.item.id}`;
                     }
+                    saveFailed = false;
                     applyItem(row, data.item);
                     setState(row, '已儲存');
                 } catch (err) {
+                    saveFailed = true;
+                    Object.entries(fields).forEach(([key, val]) => { pending[key] ??= val; });
                     setState(row, err.message, true);
                 }
             });
@@ -239,6 +250,30 @@ function init(list) {
             if (field === 'issue_no') {
                 // resolve the issue number when leaving the field, not on every keystroke
                 el.addEventListener('keydown', (e) => e.key === 'Enter' && (e.preventDefault(), flush()));
+            }
+        });
+
+        const close = row.querySelector('[data-close-issue]');
+        close?.addEventListener('click', async () => {
+            close.disabled = true;
+            try {
+                if (!row.querySelector('[data-field="conclusion"]').value.trim()) throw new Error('請先填寫結論');
+                await flush();
+                if (saveFailed || close.classList.contains('hidden')) return;
+                let note = null;
+                if (close.dataset.needsNote === '1') {
+                    note = prompt('給客戶的說明（必填，最多 500 字）');
+                    if (note === null) return;
+                    if (!note.trim() || note.length > 500) throw new Error('請填寫 500 字以內的客戶說明。');
+                }
+                if (!confirm(close.dataset.wrapup + '。確認送出會議討論結案？')) return;
+                const data = await send('POST', base + '/' + row.dataset.itemId + '/close-issue', { client_note: note });
+                applyItem(row, data.item);
+                setState(row, '已送出會議結案');
+            } catch (err) {
+                setState(row, err.message, true);
+            } finally {
+                close.disabled = false;
             }
         });
 

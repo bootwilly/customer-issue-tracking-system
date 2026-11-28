@@ -26,6 +26,7 @@ Route::middleware(['web', 'auth', 'active', 'project'])->prefix('meetings')->nam
     Route::post('/{id}/items', [MeetingController::class, 'storeItem'])->whereNumber('id')->name('items.store');
     Route::get('/{id}/issues', [MeetingController::class, 'issueSearch'])->whereNumber('id')->name('issues.search');
     Route::post('/{id}/items/issues', [MeetingController::class, 'addIssues'])->whereNumber('id')->name('items.issues');
+    Route::post('/{id}/items/{item}/close-issue', [MeetingController::class, 'closeIssue'])->whereNumber(['id', 'item'])->name('items.close-issue');
     Route::put('/{id}/items/{item}', [MeetingController::class, 'updateItem'])->whereNumber(['id', 'item'])->name('items.update');
     Route::delete('/{id}/items/{item}', [MeetingController::class, 'destroyItem'])->whereNumber(['id', 'item'])->name('items.destroy');
     Route::post('/{id}/items/{item}/move', [MeetingController::class, 'moveItem'])->whereNumber(['id', 'item'])->name('items.move');

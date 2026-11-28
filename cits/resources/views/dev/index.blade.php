@@ -1,6 +1,7 @@
 @extends('layouts.app')
 @section('title', '開發管理')
 @section('content')
+    @include('issues._pending-close')
     @php
         $tabs = ['active' => '待開發與進行中', 'all' => '全部', 'schedule' => '排程清單'];
         $keep = ['f' => 1, 'mine' => $mine ? 1 : null, 'status' => $status, 'q' => $q ?: null, 'overdue' => $overdue ? 1 : null];

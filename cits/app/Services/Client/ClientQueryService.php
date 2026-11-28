@@ -103,6 +103,9 @@ class ClientQueryService
     {
         $t = $this->detail->load($t);
 
-        return ['ticket' => $t, 'readers' => $this->tickets->readersOf($t->id)];
+        $statuses = $this->wf->statusMap('issue')->where('is_excluded', true)->keys()
+            ->merge($this->wf->lookupCodes('issue_resolved'))->all();
+
+        return ['ticket' => $t, 'clientNotes' => $this->detail->clientNotes($t, $statuses), 'readers' => $this->tickets->readersOf($t->id)];
     }
 }

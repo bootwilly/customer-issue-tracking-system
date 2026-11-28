@@ -1,6 +1,6 @@
 # PROJECT_CONTEXT
 
-Updated: 2026-11-24
+Updated: 2026-11-28
 Status: P1 deployed to production (https://<domain>/mescits/). P2 features in progress 2026-11-25. See HANDOVER.md (Chinese) for the full guide.
 
 ## Project Positioning
@@ -74,7 +74,7 @@ Status: P1 deployed to production (https://<domain>/mescits/). P2 features in pr
 ## Business Rules (confirmed by user 2026-11-24)
 
 - client_tickets and issues are separate; linked N:M (ticket_issue_links) to merge duplicate problems.
-- Status "released" (prod updated) is set by Test. A ticket moves to "pending close" only when ALL linked issues are released.
+- Status "released" (prod updated) is set by Test. A ticket moves to "pending close" when all non-excluded linked issues are released or resolved and at least one such issue exists.
 - Test "new found" issues go directly to DEV and also appear in PM list.
 - Client View role: read-only, no other function (no comment, no reopen, no close).
 - Client revision after PM accepted: takes effect immediately on submit; PM is notified only (no approval).
@@ -168,3 +168,9 @@ Status: P1 deployed to production (https://<domain>/mescits/). P2 features in pr
 - Drawing positions: use cell anchors (from/to, oneCell ext, absolute pos), never top-level a:xfrm (often stale). Group children: map chOff/chExt onto the group anchor box.
 - Shapes are composed into PNG in the browser (canvas), not on the server (no GD/font dependency). Picture uploads use per-row contexts so bindFromHtml of one issue never deletes another row's temp pictures.
 - Re-import key = project + source code + row number (no column) (issue_import_rows). Never fake created_at for imported rows; the original date stays in the content.
+
+## Internal issue closure (2026-11-28)
+- The internal PM permission issue.close initiates PM or meeting closure. A meeting close uses the linked item's saved conclusion and requires an editable meeting. Linked tickets require a separate client-visible note.
+- issue_close_wrapup maps the current workflow status to wrap-up roles. Assigned DEV/Test users and the release.manage pool acknowledge with a note. All actions lock the issue first; completion also locks the task. Withdraw voids outstanding tasks and restores the original status. A new request starts a new round.
+- Statuses in issue_resolved count as resolved for client settlement and dependencies. Closed issues cannot reopen. A frozen package keeps its membership. Close requests reject pending due changes and preserve their original reasons in the request records.
+- Apply the targeted SQL before deploying; clear the permission and workflow status caches after deployment.

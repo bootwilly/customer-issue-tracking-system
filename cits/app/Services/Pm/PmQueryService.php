@@ -11,6 +11,7 @@ use App\Services\Collab\DependencyService;
 use App\Services\Collab\NeedinfoService;
 use App\Services\Collab\TagService;
 use App\Services\Collab\WatchService;
+use App\Services\IssueCloseService;
 use App\Services\IssueService;
 use App\Services\IssueTrashService;
 use App\Services\Meeting\MeetingService;
@@ -32,6 +33,7 @@ class PmQueryService
         private WatchService $watch,
         private TagService $tags,
         private DependencyService $deps,
+        private IssueCloseService $close,
         private IssueTrashService $trash,
     ) {}
 
@@ -146,14 +148,14 @@ class PmQueryService
         $i = $this->repo->issueDetail($id) ?? throw new BusinessException('找不到這張內部單。');
         $ab = $this->issueSvc->abilities($i, $u);
         $targets = $ab['targets']->map(function ($t) {
-            $t['needs_client_note'] = $this->wf->status('issue', $t['code'])->is_excluded;
+            $t['needs_client_note'] = $this->wf->status('issue', $t['code'])->is_excluded || $this->close->resolved($t['code']);
             $t['fields'] = array_values(array_unique(array_merge($t['requires'], $t['needs_client_note'] ? ['client_note'] : [])));
 
             return $t;
         });
         $needs = fn (string $f) => $targets->contains(fn ($t) => in_array($f, $t['requires'], true));
 
-        return [
+        return $this->close->page($i, $u) + [
             'issue' => $i,
             'ab' => $ab,
             'targets' => $targets,
@@ -188,7 +190,7 @@ class PmQueryService
         $target = $this->issueSvc->abilities($i, $u)['targets']->firstWhere('code', $to)
             ?? throw new BusinessException('不允許這個狀態變更。');
         $fields = $target['requires'];
-        if ($this->wf->status('issue', $to)->is_excluded) {
+        if ($this->wf->status('issue', $to)->is_excluded || $this->close->resolved($to)) {
             $fields[] = 'client_note';
         }
 
@@ -225,7 +227,8 @@ class PmQueryService
     /** @return string[] */
     private function openIssueStatuses(): array
     {
-        return $this->wf->statusMap('issue')->where('is_terminal', false)->keys()->all();
+        return $this->wf->statusMap('issue')->where('is_terminal', false)
+            ->except($this->wf->lookupValue('issue_close_state', 'wrapup'))->keys()->all();
     }
 
     private function usersWith(int $projectId, string $perm)

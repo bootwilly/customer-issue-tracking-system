@@ -26,6 +26,7 @@ class SettlementService
     public function recompute(int $issueId, int $actorId): void
     {
         $statuses = $this->wf->statusMap('issue');
+        $resolved = null;
         foreach ($this->tickets->ticketsOfIssue($issueId, true) as $t) {
             if ($this->wf->status('ticket', $t->status)->is_terminal) {
                 continue;
@@ -42,7 +43,8 @@ class SettlementService
 
                 continue;
             }
-            if ($active->every(fn ($i) => $statuses[$i->status]->is_released)) {
+            $resolved ??= $this->wf->lookupCodes('issue_resolved');
+            if ($active->every(fn ($i) => $statuses[$i->status]->is_released || in_array($i->status, $resolved, true))) {
                 $to = $this->wf->targetByPermission('ticket', $t->status, WorkflowService::SYSTEM);
                 if (! $to) {
                     continue;
@@ -51,7 +53,7 @@ class SettlementService
                 $this->tickets->save($t, ['status' => $to, 'needs_pm_action' => false, 'row_version' => $t->row_version + 1]);
                 $excluded = $linked->diff($active)->map(fn ($i) => ['no' => $i->issue_no, 'note' => $i->client_note])->values()->all();
                 $this->events->log($t->project_id, 'ticket', $t->id, 'pending_close', $from, $to, $actorId, $excluded ? ['excluded' => $excluded] : []);
-                $this->watch->notifyTicket($t, "{$t->ticket_no} 已更新至正式環境，請確認是否結案", null, [], [$t->created_by]);
+                $this->watch->notifyTicket($t, "{$t->ticket_no} 已處理完成，請確認是否結案", null, [], [$t->created_by]);
             }
         }
     }

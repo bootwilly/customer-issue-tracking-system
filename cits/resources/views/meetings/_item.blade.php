@@ -4,6 +4,7 @@
     $box = 'rounded-md border border-slate-300 bg-white px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500';
     $from = $isClient ? null : $i?->carriedFrom?->meeting; // the earlier meeting may not be shared with clients
     $closed = ! $isClient && $svc->issueClosed($i);
+    $close = $isClient ? [] : $svc->closeOptions(auth()->user(), $m->project_id, $i);
     $others = $i ? ($history[$i->id] ?? collect()) : collect();
 @endphp
 @if ($canEdit)
@@ -45,6 +46,11 @@
                 </label>
                 <a data-issue-link href="{{ $i?->issue ? route('issues.show', $i->issue->id) : '#' }}" target="_blank"
                    class="text-xs text-indigo-700 hover:underline {{ $i?->issue ? '' : 'hidden' }}">{{ $i?->issue ? $i->issue->title.'（'.$svc->issueStatusLabel($i->issue->status).'）' : '' }}</a>
+                <span data-issue-closing class="rounded bg-amber-100 px-1.5 text-xs {{ $close['issue_closing'] ? '' : 'hidden' }}">結案收尾中</span>
+                @if ($canRequestClose)
+                    <button type="button" data-close-issue data-needs-note="{{ (int) $close['needs_client_note'] }}" data-wrapup="{{ $close['close_wrapup'] }}"
+                            class="rounded border px-2 text-indigo-700 {{ $close['can_close_issue'] ? '' : 'hidden' }}">會議討論結案</button>
+                @endif
                 <span data-issue-closed class="rounded bg-red-100 px-1.5 text-xs text-red-700 {{ $closed ? '' : 'hidden' }}">內部單已結案</span>
                 <span data-issue-trashed class="rounded bg-slate-200 px-1.5 text-xs text-slate-600 {{ $svc->issueTrashed($i) ? '' : 'hidden' }}"
                       title="還原後連結會自動恢復；在單號欄輸入其它單號才會改掉">原關聯的內部單在回收筒</span>
@@ -79,6 +85,7 @@
                 @if ($i->owner)<span>負責人：{{ $i->owner->name }}</span>@endif
                 @if ($i->due_date)<span>期限：{{ $i->due_date->format('Y-m-d') }}</span>@endif
                 @if ($i->issue)<a href="{{ route('issues.show', $i->issue->id) }}" class="text-indigo-700 hover:underline">{{ $i->issue->issue_no }} {{ $i->issue->title }}</a>@endif
+                @if ($close['issue_closing'] ?? false)<span class="text-amber-700">結案收尾中</span>@endif
                 @if ($closed)<span class="rounded bg-red-100 px-1.5 text-red-700">內部單已結案</span>@endif
                 @if (! $isClient && $svc->issueTrashed($i))<span class="rounded bg-slate-200 px-1.5 text-slate-600">原關聯的內部單在回收筒</span>@endif
                 @if ($from)<a href="{{ route('meetings.show', $from->id) }}" class="text-amber-700 hover:underline">延續自 {{ tw($from->start_at, 'm/d') }}</a>@endif

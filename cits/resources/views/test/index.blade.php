@@ -1,6 +1,7 @@
 @extends('layouts.app')
 @section('title', '測試管理')
 @section('content')
+    @include('issues._pending-close')
     @php
         $tabs = ['active' => '測試與上線', 'bounced' => '已退回/新發現'];
         $keep = ['f' => 1, 'mine' => $mine ? 1 : null, 'status' => $status, 'q' => $q ?: null];

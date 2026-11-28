@@ -126,6 +126,8 @@ class DependencyService
     /** @return string[] issue statuses that no longer block (released or excluded) */
     private function doneStatuses(): array
     {
-        return $this->wf->statusMap('issue')->filter(fn ($s) => $s->is_released || $s->is_excluded)->keys()->all();
+        $resolved = $this->wf->lookupCodes('issue_resolved');
+
+        return $this->wf->statusMap('issue')->filter(fn ($s) => $s->is_released || $s->is_excluded || in_array($s->code, $resolved, true))->keys()->all();
     }
 }

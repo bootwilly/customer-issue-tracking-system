@@ -84,10 +84,10 @@ class IssueService
             }),
             'editable' => $editable,
             'set_due' => $isDev && $i->current_due === null && $this->wf->status('issue', $i->status)->stage === $this->wf->lookupValue('stage_role', 'dev'),
-            'request_due' => $this->wf->can($u, 'due.request', $i->project_id) && $i->current_due !== null && ! $this->wf->status('issue', $i->status)->is_terminal,
+            'request_due' => $this->wf->can($u, 'due.request', $i->project_id) && $i->current_due !== null && $i->close_target === null && ! $this->wf->status('issue', $i->status)->is_terminal,
             'comment' => $u->seesInternal(),
             'addendum' => $this->wf->can($u, 'issue.edit_pm', $i->project_id) || $u->id === $i->created_by,
-            'link' => $this->wf->can($u, 'issue.link', $i->project_id) && ! $this->wf->status('issue', $i->status)->is_terminal,
+            'link' => $i->close_target === null && $this->wf->can($u, 'issue.link', $i->project_id) && ! $this->wf->status('issue', $i->status)->is_terminal,
         ];
     }
 
@@ -113,6 +113,8 @@ class IssueService
             'dependency_added', 'dependency_removed' => trim(($p['issue'] ?? '').' '.(isset($p['kind']) ? $this->wf->lookupLabel('dependency_kind', $p['kind']) : '')),
             'tags_changed' => implode('、', array_map(fn ($c) => $this->wf->lookupLabel('issue_tag', $c), $p['to'] ?? [])) ?: '（無）',
             'meeting_discussed' => '「'.($p['meeting'] ?? '').'」'.(($p['conclusion'] ?? '') !== '' ? '：'.$p['conclusion'] : ''),
+            'close_requested' => ($p['reason'] ?? '').'（'.implode('、', $p['roles'] ?? []).'）',
+            'closed_by_meeting' => $p['meeting'] ?? null,
             'from_meeting' => '「'.($p['meeting'] ?? '').'」第 '.($p['item'] ?? '?').' 項',
             default => null,
         };
@@ -262,6 +264,9 @@ class IssueService
     {
         return $this->uow->run(function () use ($u, $id, $projectId, $to, $data, $newPackageName) {
             $i = $this->locked($id, $projectId, $u);
+            if (in_array($to, $this->wf->lookupCodes('issue_resolved'), true)) {
+                throw new BusinessException('請透過結案流程送出。');
+            }
             $name = trim($newPackageName ?? '');
             if ($name !== '') {
                 $target = $this->wf->allowedTargets('issue', $i->status, $u, $projectId)->firstWhere('code', $to);
@@ -369,6 +374,9 @@ class IssueService
             if (! $t || $t->project_id !== $projectId || $t->accepted_at === null) {
                 throw new BusinessException('客戶單不存在或尚未接收。');
             }
+            if ($i->close_target !== null || in_array($i->status, $this->wf->lookupCodes('issue_resolved'), true)) {
+                throw new BusinessException('結案中或已結案的單不能再連結客戶單。');
+            }
             $this->tickets->link($t->id, $i->id, $t->current_rev, $u->id);
             $this->tickets->save($t, ['needs_pm_action' => false]);
             $this->events->log($projectId, 'issue', $i->id, 'linked', null, null, $u->id, ['ticket' => $t->ticket_no]);
@@ -385,6 +393,9 @@ class IssueService
         $this->uow->run(function () use ($u, $id, $projectId, $newDue, $reason) {
             $this->wf->authorize($u, 'due.request', $projectId);
             $i = $this->locked($id, $projectId, $u);
+            if ($i->close_target !== null || $this->wf->status('issue', $i->status)->is_terminal) {
+                throw new BusinessException('結案中或已結束的單不能申請延期。');
+            }
             if (trim($reason) === '') {
                 throw new BusinessException('請填寫延期原因。');
             }
@@ -516,6 +527,9 @@ class IssueService
 
         return $this->uow->run(function () use ($u, $projectId, $packageId, $issueId) {
             $i = $this->locked($issueId, $projectId, $u);
+            if ($i->close_target !== null) {
+                throw new BusinessException('結案收尾中，不能撤回送測。');
+            }
             if ($i->package_id !== $packageId) {
                 throw new BusinessException('這張單不在此更新包。');
             }
@@ -581,6 +595,17 @@ class IssueService
     private function packageIsReleased(Package $package, array $releasedCodes): bool
     {
         return $package->released_at !== null || $this->issues->hasReleasedPackageIssue($package, $releasedCodes);
+    }
+
+    /** Caller holds the issue lock. A frozen package retains all original members. */
+    public function detachOpenPackage(Issue $issue): void
+    {
+        if ($issue->package_id !== null) {
+            $package = $this->lockPackages($issue->project_id, [$issue->package_id])->get($issue->package_id);
+            if (! $this->packageIsReleased($package, $this->releasedIssueCodes())) {
+                $this->issues->save($issue, [self::PACKAGE_FIELD => null]);
+            }
+        }
     }
 
     private function assertPackageOpen(Package $package, array $releasedCodes): void

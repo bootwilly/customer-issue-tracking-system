@@ -104,7 +104,8 @@ class TicketRepository
     /** @return Collection<int, ClientTicket> */
     public function ticketsOfIssue(int $issueId, bool $lock = false): Collection
     {
-        $ids = DB::table('ticket_issue_links')->where('issue_id', $issueId)->pluck('ticket_id')->all();
+        $links = DB::table('ticket_issue_links')->where('issue_id', $issueId);
+        $ids = ($lock ? $links->sharedLock() : $links)->pluck('ticket_id')->all();
 
         return $lock ? $this->lockMany($ids) : ClientTicket::whereIn('id', $ids)->orderBy('id')->get();
     }
@@ -132,7 +133,7 @@ class TicketRepository
     {
         return DB::table('ticket_issue_links as l')->join('issues as i', 'i.id', '=', 'l.issue_id')
             ->whereIn('l.ticket_id', $ticketIds ?: [0])->whereNull('i.deleted_at')
-            ->get(['l.ticket_id', 'i.stage', 'i.status', 'i.release_planned_at']);
+            ->get(['l.ticket_id', 'i.stage', 'i.status', 'i.close_from', 'i.release_planned_at']);
     }
 
     public function linkCountOfIssue(int $issueId): int

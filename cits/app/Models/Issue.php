@@ -26,6 +26,7 @@ class Issue extends Model
             'actual_done_at' => 'datetime',
             'test_scheduled_at' => 'date',
             'release_planned_at' => 'date',
+            'closed_at' => 'datetime',
             'released_at' => 'datetime',
             'content_locked_at' => 'datetime',
         ];
@@ -75,6 +76,16 @@ class Issue extends Model
     public function addenda(): HasMany
     {
         return $this->hasMany(IssueAddendum::class)->orderBy('id');
+    }
+
+    public function closeTasks(): HasMany
+    {
+        return $this->hasMany(IssueCloseTask::class);
+    }
+
+    public function closeMeetingItem(): BelongsTo
+    {
+        return $this->belongsTo(MeetingItem::class, 'close_meeting_item_id');
     }
 
     public function comments(): HasMany

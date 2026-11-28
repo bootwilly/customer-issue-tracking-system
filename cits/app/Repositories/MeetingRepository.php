@@ -7,6 +7,7 @@ use App\Models\Meeting;
 use App\Models\MeetingAttendee;
 use App\Models\MeetingComment;
 use App\Models\MeetingItem;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -150,16 +151,26 @@ class MeetingRepository
 
     // ---- items ----
 
+    /** Read models shared by the first page render and subsequent autosave responses. */
+    private function itemDetails(int $meetingId): Builder
+    {
+        return MeetingItem::where('meeting_id', $meetingId)->with([
+            'owner:id,name,user_type,is_admin',
+            'issue' => fn ($q) => $q->select(['id', 'issue_no', 'title', 'status', 'project_id', 'close_target', 'assignee_dev_id', 'assignee_test_id'])
+                ->with(['dev:id,name', 'tester:id,name'])->withCount('tickets'),
+        ]);
+    }
+
     /** @return Collection<int, MeetingItem> */
     public function items(int $meetingId): Collection
     {
-        return MeetingItem::with(['owner:id,name', 'issue:id,issue_no,title,status', 'carriedFrom:id,meeting_id', 'carriedFrom.meeting:id,start_at'])
-            ->where('meeting_id', $meetingId)->orderBy('sort')->orderBy('id')->get();
+        return $this->itemDetails($meetingId)->with(['carriedFrom:id,meeting_id', 'carriedFrom.meeting:id,start_at'])
+            ->orderBy('sort')->orderBy('id')->get();
     }
 
     public function item(int $meetingId, int $itemId): ?MeetingItem
     {
-        return MeetingItem::with(['owner:id,name,user_type,is_admin', 'issue:id,issue_no,title,status'])->where(['meeting_id' => $meetingId, 'id' => $itemId])->first();
+        return $this->itemDetails($meetingId)->find($itemId);
     }
 
     public function maxItemSort(int $meetingId): int
