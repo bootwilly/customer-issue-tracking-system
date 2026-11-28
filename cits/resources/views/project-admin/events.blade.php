@@ -18,6 +18,7 @@
                             <td class="px-3 py-2">{{ $e->actor?->name }}</td>
                             <td class="px-3 py-2">{{ $e->label }}</td>
                             <td class="px-3 py-2 text-xs text-slate-600">
+                                @if ($e->subject_type === 'issue' && isset($p['issue']))<span class="font-medium">{{ $p['issue'] }}</span>@endif
                                 {{ $p['title'] ?? (isset($p['account']) ? $p['account'].' '.($p['name'] ?? '') : '') }}
                                 @if (isset($p['version']))　v{{ $p['version'] }}@endif
                                 @if (isset($p['versions']))　共 {{ $p['versions'] }} 版@endif

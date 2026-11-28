@@ -5,6 +5,7 @@ namespace App\Http\Controllers\ProjectAdmin;
 use App\Exceptions\BusinessException;
 use App\Http\Controllers\Controller;
 use App\Services\Flow\FlowService;
+use App\Services\IssueTrashService;
 use App\Services\Meeting\MeetingService;
 use App\Services\ProjectAdminService;
 use App\Support\CurrentProject;
@@ -12,7 +13,7 @@ use Illuminate\Http\Request;
 
 class ProjectAdminController extends Controller
 {
-    public function __construct(private ProjectAdminService $svc, private FlowService $flows, private MeetingService $meetings, private CurrentProject $project) {}
+    public function __construct(private ProjectAdminService $svc, private FlowService $flows, private MeetingService $meetings, private IssueTrashService $issues, private CurrentProject $project) {}
 
     private function pid(Request $r, ?string $need = null): int
     {
@@ -78,7 +79,10 @@ class ProjectAdminController extends Controller
     {
         $pid = $this->pid($r, 'trash');
 
-        return view('project-admin.trash', $this->tabs($r, $pid) + ['flows' => $this->flows->trashed($r->user(), $pid), 'meetings' => $this->meetings->trashed($r->user(), $pid)]);
+        return view('project-admin.trash', $this->tabs($r, $pid) + [
+            'flows' => $this->flows->trashed($r->user(), $pid), 'meetings' => $this->meetings->trashed($r->user(), $pid),
+            'issues' => $this->issues->trashed($r->user(), $pid),
+        ]);
     }
 
     public function restoreFlow(Request $r, int $id)
@@ -109,6 +113,21 @@ class ProjectAdminController extends Controller
         $d = $r->validate(['confirm_title' => ['required', 'string', 'max:200']], [], ['confirm_title' => '會議主題']);
 
         return $this->run(fn () => $this->meetings->purge($r->user(), $pid, $id, $d['confirm_title']), '已永久刪除。');
+    }
+
+    public function restoreIssue(Request $r, int $id)
+    {
+        $pid = $this->pid($r, 'trash');
+
+        return $this->run(fn () => $this->issues->restore($r->user(), $pid, $id), '已還原內部單。');
+    }
+
+    public function purgeIssue(Request $r, int $id)
+    {
+        $pid = $this->pid($r, 'trash');
+        $d = $r->validate(['confirm_no' => ['required', 'string', 'max:30']], [], ['confirm_no' => '單號']);
+
+        return $this->run(fn () => $this->issues->purge($r->user(), $pid, $id, $d['confirm_no']), '已永久刪除。');
     }
 
     public function events(Request $r)

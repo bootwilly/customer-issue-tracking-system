@@ -7,12 +7,15 @@ use App\Models\DueChangeRequest;
 use App\Models\Issue;
 use App\Models\IssueAddendum;
 use App\Models\IssueComment;
+use App\Models\IssueDependency;
+use App\Models\IssueImportRow;
 use App\Models\Package;
 use App\Models\TicketComment;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 class IssueRepository
 {
@@ -34,6 +37,67 @@ class IssueRepository
     public function findForUpdate(int $id): ?Issue
     {
         return Issue::whereKey($id)->lockForUpdate()->first();
+    }
+
+    /**
+     * Live issues locked for a batch, in id order (fixed lock order).
+     *
+     * @param  int[]  $ids
+     * @return EloquentCollection<int, Issue>
+     */
+    public function lockMany(array $ids): EloquentCollection
+    {
+        return Issue::whereIn('id', $ids ?: [0])->orderBy('id')->lockForUpdate()->get();
+    }
+
+    // ---- recycle bin ----
+
+    /** @return EloquentCollection<int, Issue> deleted issues of a project, newest deletion first */
+    public function trashed(int $projectId): EloquentCollection
+    {
+        return Issue::onlyTrashed()->with(['deleter:id,name', 'creator:id,name', 'tickets:id,ticket_no'])
+            ->where('project_id', $projectId)->orderByDesc('deleted_at')->orderByDesc('id')->get();
+    }
+
+    /** A deleted issue (with who deleted it), or null when the issue is live or gone. */
+    public function findTrashed(int $id): ?Issue
+    {
+        return Issue::onlyTrashed()->with('deleter:id,name')->find($id);
+    }
+
+    public function lockTrashed(int $id): ?Issue
+    {
+        return Issue::onlyTrashed()->whereKey($id)->lockForUpdate()->first();
+    }
+
+    public function moveToTrash(Issue $i, int $userId): void
+    {
+        $i->fill(['deleted_at' => now(), 'deleted_by' => $userId])->save();
+    }
+
+    public function restoreFromTrash(Issue $i): void
+    {
+        $i->fill(['deleted_at' => null, 'deleted_by' => null])->save();
+    }
+
+    /** @return int[] */
+    public function commentIds(int $issueId): array
+    {
+        return IssueComment::where('issue_id', $issueId)->pluck('id')->all();
+    }
+
+    /** Permanent delete: every row that references the issue, then the issue (meeting_items.issue_id is set null by its FK). */
+    public function purge(Issue $i): void
+    {
+        IssueAddendum::where('issue_id', $i->id)->delete(); // before comments: an addendum may quote a comment
+        IssueComment::where('issue_id', $i->id)->delete();
+        DueChangeRequest::where('issue_id', $i->id)->delete();
+        IssueDependency::where('issue_id', $i->id)->orWhere('depends_on_id', $i->id)->delete();
+        IssueImportRow::where('issue_id', $i->id)->delete();
+        DB::table('issue_watchers')->where('issue_id', $i->id)->delete();
+        DB::table('issue_tags')->where('issue_id', $i->id)->delete();
+        DB::table('ticket_issue_links')->where('issue_id', $i->id)->delete();
+        $i->forceDelete();
     }
 
     public function create(array $data): Issue

@@ -178,10 +178,11 @@ function init(list) {
             link.textContent = item.issue_url ? item.issue_label || `開啟 ${item.issue_no}` : '';
         }
         row.querySelector('[data-issue-closed]')?.classList.toggle('hidden', !item.issue_closed);
+        row.querySelector('[data-issue-trashed]')?.classList.toggle('hidden', !item.issue_trashed);
         const convert = row.querySelector('[data-issue-convert]');
         if (convert) {
             convert.href = `${base}/${item.id}/issue`;
-            convert.classList.toggle('hidden', !!item.issue_url);
+            convert.classList.toggle('hidden', !!item.issue_url || !!item.issue_trashed);
         }
         const status = row.querySelector('[data-field="status"]');
         status.disabled = false;

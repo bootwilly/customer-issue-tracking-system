@@ -26,6 +26,12 @@
         @foreach ($tags as $tg)<span class="rounded bg-violet-100 px-2 py-0.5 text-xs text-violet-800">{{ $tagLabels[$tg] ?? $tg }}</span>@endforeach
         @if ($deps['blockers'])<a href="#deps" class="rounded bg-orange-100 px-2 py-0.5 text-xs text-orange-800">需等待 {{ implode('、', $deps['blockers']) }}</a>@endif
         <span class="ml-auto">@include('collab._watch', ['action' => route('collab.issues.watch', $issue->id), 'watching' => $watching, 'watchers' => $watchers])</span>
+        @if ($canDelete)
+            <form method="POST" action="{{ route('issues.destroy', $issue->id) }}" onsubmit="return confirm('將 {{ $issue->issue_no }} 移到回收筒？\n專案管理員可以從回收筒還原。')">
+                @csrf @method('DELETE')
+                <button type="submit" class="rounded-md border border-red-300 px-3 py-1 text-sm text-red-700 hover:bg-red-50">刪除</button>
+            </form>
+        @endif
     </div>
 
     <section class="{{ $card }} mb-4">

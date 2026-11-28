@@ -373,6 +373,9 @@ class IssueImportService
 
             $hash = hash('sha256', json_encode([$title, $content, $noteList, $hashBlocks], JSON_UNESCAPED_UNICODE));
             $prev = $no !== '' ? $existing->get($no) : null;
+            if ($prev !== null && $prev->issue === null) {
+                $errors[] = '對應的內部單在回收筒，請先還原，或永久刪除後再重新匯入';
+            }
             $state = match (true) {
                 $errors !== [] => 'error',
                 in_array($status, $skip, true) => 'skip',

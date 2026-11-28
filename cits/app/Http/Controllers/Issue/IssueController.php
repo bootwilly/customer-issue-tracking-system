@@ -6,6 +6,7 @@ use App\Exceptions\BusinessException;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Pm\Concerns\GuardsInternal;
 use App\Services\IssueService;
+use App\Services\IssueTrashService;
 use App\Services\Pm\PmQueryService;
 use Illuminate\Http\Request;
 
@@ -13,7 +14,7 @@ class IssueController extends Controller
 {
     use GuardsInternal;
 
-    public function __construct(private IssueService $issues, private PmQueryService $q) {}
+    public function __construct(private IssueService $issues, private PmQueryService $q, private IssueTrashService $trash) {}
 
     public function show(Request $request, int $id)
     {
@@ -21,10 +22,46 @@ class IssueController extends Controller
         try {
             $data = $this->q->issuePage($id, $this->pid(), $u);
         } catch (BusinessException) {
-            abort(404);
+            $gone = $this->trash->tombstone($u, $this->pid(), $id) ?? abort(404);
+
+            return response()->view('issues.deleted', ['gone' => $gone, 'canTrash' => $this->trash->canTrash($u, $this->pid())], 404);
         }
 
         return view('issues.show', $data);
+    }
+
+    /** Move a new issue to the project recycle bin. */
+    public function destroy(Request $request, int $id)
+    {
+        $u = $this->guard($request, 'issue.view');
+        try {
+            $i = $this->trash->delete($u, $this->pid(), $id);
+        } catch (BusinessException $e) {
+            return back()->with('err', $e->getMessage());
+        }
+
+        return redirect()->route('pm.index')->with('ok', "已將 {$i->issue_no} 移到回收筒。");
+    }
+
+    /** 問題管理 list: move the checked issues to the recycle bin (issues that may not be deleted are skipped). */
+    public function bulkDestroy(Request $request)
+    {
+        $u = $this->guard($request, 'issue.view');
+        $d = $request->validate(['issue_ids' => 'required|array|max:'.IssueTrashService::BULK_MAX, 'issue_ids.*' => 'integer'], [], ['issue_ids' => '內部單']);
+        try {
+            $r = $this->trash->bulkDelete($u, $this->pid(), $d['issue_ids']);
+        } catch (BusinessException $e) {
+            return back()->with('err', $e->getMessage());
+        }
+        $res = back();
+        if ($r['deleted']) {
+            $res->with('ok', '已將 '.count($r['deleted']).' 張移到回收筒：'.implode('、', $r['deleted']).'。');
+        }
+        if ($r['skipped']) {
+            $res->with('err', '未刪除：'.implode('；', array_map(fn ($s) => "{$s['no']} {$s['reason']}", $r['skipped'])));
+        }
+
+        return $res;
     }
 
     public function transition(Request $request, int $id)

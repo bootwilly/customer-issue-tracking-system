@@ -143,7 +143,7 @@ class ProjectAdminService
         }
 
         // subject type = workflow scope of the statuses an event carries
-        return $this->events->forProject($pid, ['member', 'flow', 'meeting'])->each(function ($e) {
+        return $this->events->forProject($pid, ['member', 'flow', 'meeting'], 200, ['issue' => IssueTrashService::EVENTS])->each(function ($e) {
             $e->label = $this->wf->lookupLabel('event_label', $e->event_type);
             $e->from_label = $e->from_status ? $this->wf->label($e->subject_type, $e->from_status) : null;
             $e->to_label = $e->to_status ? $this->wf->label($e->subject_type, $e->to_status) : null;

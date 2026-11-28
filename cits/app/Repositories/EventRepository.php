@@ -41,10 +41,20 @@ class EventRepository
      * @param  string[]  $subjectTypes
      * @return Collection<int, ActivityEvent>
      */
-    public function forProject(int $projectId, array $subjectTypes, int $limit = 200): Collection
+    /**
+     * @param  string[]  $subjectTypes  every event of these subjects
+     * @param  array<string, string[]>  $only  subject type => only these event types
+     */
+    public function forProject(int $projectId, array $subjectTypes, int $limit = 200, array $only = []): Collection
     {
         return ActivityEvent::with('actor:id,name,account')
-            ->where('project_id', $projectId)->whereIn('subject_type', $subjectTypes)
+            ->where('project_id', $projectId)
+            ->where(function ($q) use ($subjectTypes, $only) {
+                $q->whereIn('subject_type', $subjectTypes);
+                foreach ($only as $type => $events) {
+                    $q->orWhere(fn ($w) => $w->where('subject_type', $type)->whereIn('event_type', $events));
+                }
+            })
             ->orderByDesc('id')->limit($limit)->get();
     }
 

@@ -131,7 +131,7 @@ class TicketRepository
     public function linkedIssueStates(array $ticketIds): Collection
     {
         return DB::table('ticket_issue_links as l')->join('issues as i', 'i.id', '=', 'l.issue_id')
-            ->whereIn('l.ticket_id', $ticketIds ?: [0])
+            ->whereIn('l.ticket_id', $ticketIds ?: [0])->whereNull('i.deleted_at')
             ->get(['l.ticket_id', 'i.stage', 'i.status', 'i.release_planned_at']);
     }
 

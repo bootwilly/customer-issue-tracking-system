@@ -46,6 +46,8 @@
                 <a data-issue-link href="{{ $i?->issue ? route('issues.show', $i->issue->id) : '#' }}" target="_blank"
                    class="text-xs text-indigo-700 hover:underline {{ $i?->issue ? '' : 'hidden' }}">{{ $i?->issue ? $i->issue->title.'（'.$svc->issueStatusLabel($i->issue->status).'）' : '' }}</a>
                 <span data-issue-closed class="rounded bg-red-100 px-1.5 text-xs text-red-700 {{ $closed ? '' : 'hidden' }}">內部單已結案</span>
+                <span data-issue-trashed class="rounded bg-slate-200 px-1.5 text-xs text-slate-600 {{ $svc->issueTrashed($i) ? '' : 'hidden' }}"
+                      title="還原後連結會自動恢復；在單號欄輸入其它單號才會改掉">原關聯的內部單在回收筒</span>
                 @if ($canConvert)
                     <a data-issue-convert href="{{ $i ? route('meetings.items.issue', [$m->id, $i->id]) : '#' }}"
                        class="rounded px-1.5 text-xs text-indigo-700 ring-1 ring-indigo-200 hover:bg-indigo-50 {{ $i && ! $i->issue_id ? '' : 'hidden' }}">轉內部單</a>
@@ -78,6 +80,7 @@
                 @if ($i->due_date)<span>期限：{{ $i->due_date->format('Y-m-d') }}</span>@endif
                 @if ($i->issue)<a href="{{ route('issues.show', $i->issue->id) }}" class="text-indigo-700 hover:underline">{{ $i->issue->issue_no }} {{ $i->issue->title }}</a>@endif
                 @if ($closed)<span class="rounded bg-red-100 px-1.5 text-red-700">內部單已結案</span>@endif
+                @if (! $isClient && $svc->issueTrashed($i))<span class="rounded bg-slate-200 px-1.5 text-slate-600">原關聯的內部單在回收筒</span>@endif
                 @if ($from)<a href="{{ route('meetings.show', $from->id) }}" class="text-amber-700 hover:underline">延續自 {{ tw($from->start_at, 'm/d') }}</a>@endif
             </div>
         @endif

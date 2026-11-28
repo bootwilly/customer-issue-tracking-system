@@ -120,6 +120,8 @@ return [
         ['issue_initial', 'pm', 'new', 20],
         ['issue_initial', 'dev', 'dev_todo', 30],
         ['issue_initial', 'test', 'test_found', 40],
+        // issue statuses that may be moved to the recycle bin (code = status code); others are cancelled instead
+        ['issue_deletable', 'new', '新建', 10],
         ['ticket_initial', 'default', 'submitted', 10],
         // permission required to create an issue of each origin
         ['issue_create_perm', 'pm', 'issue.edit_pm', 10],
@@ -179,6 +181,9 @@ return [
         ['event_label', 'meeting_purged', '永久刪除會議', 300],
         ['event_label', 'meeting_discussed', '會議結論', 310],
         ['event_label', 'from_meeting', '由會議事項建立', 320],
+        ['event_label', 'issue_deleted', '刪除內部單（回收筒）', 330],
+        ['event_label', 'issue_restored', '還原內部單', 340],
+        ['event_label', 'issue_purged', '永久刪除內部單', 350],
         // collaboration features: needinfo / watch / tags / dependencies (ticket + issue timelines, project events)
         ['event_label', 'needinfo_requested', '要求客戶補充資料', 400],
         ['event_label', 'needinfo_answered', '客戶已補充資料', 410],
@@ -416,7 +421,7 @@ return [
         // code => [user_type, name, permissions]
         'client_pm' => ['client', '客戶 PM', ['data.export', 'flow.view', 'flow.manage', 'meeting.view', 'meeting.create', 'meeting.comment', 'ticket.view', 'ticket.create', 'ticket.edit', 'ticket.cancel', 'ticket.close', 'ticket.reopen', 'ticket.comment']],
         'client_view' => ['client', '客戶 View', ['data.export', 'flow.view', 'meeting.view', 'ticket.view']],
-        'internal_pm' => ['internal', '內部 PM', ['data.export', 'flow.view', 'flow.manage', 'meeting.view', 'meeting.create', 'meeting.share', 'meeting.comment', 'meeting.manage', 'ticket.view', 'ticket.accept', 'ticket.reply', 'ticket.settle', 'issue.view', 'issue.create', 'issue.edit_pm', 'issue.dispatch', 'issue.cancel', 'issue.link', 'issue.tag', 'ticket.needinfo', 'due.approve', 'mes.manage']],
+        'internal_pm' => ['internal', '內部 PM', ['data.export', 'flow.view', 'flow.manage', 'meeting.view', 'meeting.create', 'meeting.share', 'meeting.comment', 'meeting.manage', 'ticket.view', 'ticket.accept', 'ticket.reply', 'ticket.settle', 'issue.view', 'issue.create', 'issue.edit_pm', 'issue.dispatch', 'issue.cancel', 'issue.delete', 'issue.link', 'issue.tag', 'ticket.needinfo', 'due.approve', 'mes.manage']],
         'dev' => ['internal', 'DEV', ['data.export', 'flow.view', 'meeting.view', 'meeting.create', 'meeting.share', 'meeting.comment', 'ticket.view', 'issue.view', 'issue.create', 'issue.tag', 'dev.manage', 'due.request', 'mes.manage']],
         'test' => ['internal', 'Test', ['data.export', 'flow.view', 'meeting.view', 'meeting.create', 'meeting.share', 'meeting.comment', 'ticket.view', 'issue.view', 'issue.create', 'issue.tag', 'test.manage', 'release.manage', 'mes.manage']],
         'project_admin' => ['internal', '專案管理員', ['flow.view', 'flow.manage', 'flow.delete', 'meeting.view', 'meeting.delete', 'project.members', 'project.trash']],

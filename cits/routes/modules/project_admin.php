@@ -15,5 +15,7 @@ Route::middleware(['web', 'auth', 'active', 'project'])->prefix('project-admin')
     Route::delete('/trash/flows/{id}', [ProjectAdminController::class, 'purgeFlow'])->whereNumber('id')->name('trash.purge');
     Route::post('/trash/meetings/{id}/restore', [ProjectAdminController::class, 'restoreMeeting'])->whereNumber('id')->name('trash.meetings.restore');
     Route::delete('/trash/meetings/{id}', [ProjectAdminController::class, 'purgeMeeting'])->whereNumber('id')->name('trash.meetings.purge');
+    Route::post('/trash/issues/{id}/restore', [ProjectAdminController::class, 'restoreIssue'])->whereNumber('id')->name('trash.issues.restore');
+    Route::delete('/trash/issues/{id}', [ProjectAdminController::class, 'purgeIssue'])->whereNumber('id')->name('trash.issues.purge');
     Route::get('/events', [ProjectAdminController::class, 'events'])->name('events');
 });

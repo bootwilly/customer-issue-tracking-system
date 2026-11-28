@@ -32,13 +32,13 @@ class DependencyRepository
     /** @return Collection<int, IssueDependency> what this issue waits for (with the upstream issue) */
     public function upstream(int $issueId): Collection
     {
-        return IssueDependency::with('dependsOn:id,project_id,issue_no,title,status')->where('issue_id', $issueId)->orderBy('id')->get();
+        return IssueDependency::with('dependsOn:id,project_id,issue_no,title,status')->where('issue_id', $issueId)->whereHas('dependsOn')->orderBy('id')->get();
     }
 
     /** @return Collection<int, IssueDependency> issues waiting for this one */
     public function downstream(int $issueId): Collection
     {
-        return IssueDependency::with('issue:id,project_id,issue_no,title,status')->where('depends_on_id', $issueId)->orderBy('id')->get();
+        return IssueDependency::with('issue:id,project_id,issue_no,title,status')->where('depends_on_id', $issueId)->whereHas('issue')->orderBy('id')->get();
     }
 
     /**
@@ -74,7 +74,7 @@ class DependencyRepository
         $out = [];
         IssueDependency::query()->join('issues as up', 'up.id', '=', 'issue_dependencies.depends_on_id')
             ->whereIn('issue_dependencies.issue_id', $issueIds)->whereIn('issue_dependencies.kind', $kinds)
-            ->whereNotIn('up.status', $doneStatuses ?: ['-'])
+            ->whereNotIn('up.status', $doneStatuses ?: ['-'])->whereNull('up.deleted_at')
             ->orderBy('up.issue_no')
             ->get(['issue_dependencies.issue_id', 'up.issue_no'])
             ->each(function ($r) use (&$out) {

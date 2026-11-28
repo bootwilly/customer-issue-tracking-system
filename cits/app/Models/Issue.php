@@ -6,9 +6,13 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
+/** Deleted (recycle bin) issues are hidden everywhere by SoftDeletes; raw DB::table('issues') queries add whereNull('deleted_at') themselves. */
 class Issue extends Model
 {
+    use SoftDeletes;
+
     protected $table = 'issues';
 
     protected $guarded = ['id'];
@@ -35,6 +39,11 @@ class Issue extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function deleter(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'deleted_by');
     }
 
     public function dev(): BelongsTo

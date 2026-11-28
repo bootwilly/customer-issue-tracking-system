@@ -30,8 +30,10 @@ Route::middleware(['web', 'auth', 'active', 'project'])->group(function () {
     Route::get('/pm/issues/create', [PmIssueCreateController::class, 'create'])->name('pm.issues.create');
     Route::post('/pm/issues', [PmIssueCreateController::class, 'store'])->name('pm.issues.store');
     Route::get('/pm/issues/{id}', fn (int $id) => redirect()->route('issues.show', $id))->whereNumber('id');
+    Route::post('/pm/issues/bulk-delete', [IssueController::class, 'bulkDestroy'])->name('issues.bulk-destroy');
 
     Route::get('/issues/{id}', [IssueController::class, 'show'])->whereNumber('id')->name('issues.show');
+    Route::delete('/issues/{id}', [IssueController::class, 'destroy'])->whereNumber('id')->name('issues.destroy');
     Route::post('/issues/{id}/transition', [IssueController::class, 'transition'])->whereNumber('id')->name('issues.transition');
     Route::post('/issues/{id}/fields', [IssueController::class, 'fields'])->whereNumber('id')->name('issues.fields');
     Route::post('/issues/{id}/due', [IssueController::class, 'setDue'])->whereNumber('id')->name('issues.due');

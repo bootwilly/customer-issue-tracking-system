@@ -147,9 +147,15 @@
             @endif
             <button class="rounded-md bg-slate-100 px-3 py-1.5 text-sm hover:bg-slate-200">篩選</button>
         </form>
-        @php $pickMeeting = $meetingTargets->isNotEmpty() || $canCreateMeeting; @endphp
+        @php
+            $pickMeeting = $meetingTargets->isNotEmpty() || $canCreateMeeting;
+            $pickRows = $pickMeeting || $can['delete'];
+        @endphp
+        @if ($pickRows && $issues->isNotEmpty())
+        <div class="mb-3 flex flex-wrap items-center gap-2">
+        @endif
         @if ($pickMeeting && $issues->isNotEmpty())
-            <form id="meet-bulk" method="POST" action="{{ route('meetings.add-issues') }}" class="mb-3 flex flex-wrap items-center gap-2 rounded-md bg-indigo-50 px-3 py-2 text-sm"
+            <form id="meet-bulk" method="POST" action="{{ route('meetings.add-issues') }}" class="flex flex-wrap items-center gap-2 rounded-md bg-indigo-50 px-3 py-2 text-sm"
                   onsubmit="if (!this.querySelector('[name=meeting_id]').value) { alert('請選擇會議'); return false; } if (!document.querySelector('[form=meet-bulk][name=\'issue_ids[]\']:checked')) { alert('請先勾選問題單'); return false; }">
                 @csrf
                 <span class="text-indigo-900">排入會議：</span>
@@ -164,15 +170,25 @@
                 <span class="text-xs text-indigo-800/70">勾選左側問題單（本頁）</span>
             </form>
         @endif
+        @if ($can['delete'] && $issues->isNotEmpty())
+            <form method="POST" action="{{ route('issues.bulk-destroy') }}" data-del-form class="ml-auto">
+                @csrf
+                <button type="submit" data-del-btn class="rounded-md border border-red-300 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50" disabled
+                        title="只有新建狀態、且你是建立者或內部 PM 的單會被刪除，其它會略過">刪除選取（0）</button>
+            </form>
+        @endif
+        @if ($pickRows && $issues->isNotEmpty())
+        </div>
+        @endif
         <div class="overflow-x-auto">
             <table class="min-w-full divide-y divide-slate-200 text-sm">
                 <thead class="bg-slate-50 text-left text-xs text-slate-500">
-                    <tr>@if ($pickMeeting && $issues->isNotEmpty())<th class="w-8 px-3 py-2"><input type="checkbox" data-meet-all class="rounded border-slate-300" title="全選本頁"></th>@endif<th class="px-3 py-2">單號</th><th class="px-3 py-2">標題</th><th class="px-3 py-2">來源</th><th class="px-3 py-2">嚴重度</th><th class="px-3 py-2">狀態</th><th class="px-3 py-2">DEV</th><th class="px-3 py-2">Test</th><th class="px-3 py-2">預計完工</th><th class="px-3 py-2">客戶單</th></tr>
+                    <tr>@if ($pickRows && $issues->isNotEmpty())<th class="w-8 px-3 py-2"><input type="checkbox" data-meet-all class="rounded border-slate-300" title="全選本頁"></th>@endif<th class="px-3 py-2">單號</th><th class="px-3 py-2">標題</th><th class="px-3 py-2">來源</th><th class="px-3 py-2">嚴重度</th><th class="px-3 py-2">狀態</th><th class="px-3 py-2">DEV</th><th class="px-3 py-2">Test</th><th class="px-3 py-2">預計完工</th><th class="px-3 py-2">客戶單</th></tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
                     @forelse ($issues as $i)
                         <tr class="cursor-pointer hover:bg-slate-50" onclick="location.href='{{ route('issues.show', $i->id) }}'">
-                            @if ($pickMeeting)
+                            @if ($pickRows)
                                 <td class="px-3 py-2" onclick="event.stopPropagation()"><input type="checkbox" form="meet-bulk" name="issue_ids[]" value="{{ $i->id }}" data-meet-pick class="rounded border-slate-300"></td>
                             @endif
                             <td class="whitespace-nowrap px-3 py-2 font-medium text-indigo-700">{{ $i->issue_no }}</td>
@@ -205,13 +221,30 @@
     <script>
         (() => {
             const btn = document.querySelector('[data-meet-btn]');
-            if (!btn) return;
+            const del = document.querySelector('[data-del-btn]');
+            if (!btn && !del) return;
             const picks = [...document.querySelectorAll('[data-meet-pick]')];
+            const checked = () => picks.filter((p) => p.checked);
             const sync = () => {
-                const n = picks.filter((p) => p.checked).length;
-                btn.disabled = n === 0;
-                btn.textContent = `排入（${n}）`;
+                const n = checked().length;
+                if (btn) {
+                    btn.disabled = n === 0;
+                    btn.textContent = `排入（${n}）`;
+                }
+                if (del) {
+                    del.disabled = n === 0;
+                    del.textContent = `刪除選取（${n}）`;
+                }
             };
+            document.querySelector('[data-del-form]')?.addEventListener('submit', (e) => {
+                const ids = checked().map((p) => p.value);
+                if (!ids.length || !confirm(`將勾選的 ${ids.length} 張內部單移到回收筒？\n不是新建狀態、或你不能刪的單會略過。`)) {
+                    e.preventDefault();
+                    return;
+                }
+                e.target.querySelectorAll('input[name="issue_ids[]"]').forEach((i) => i.remove());
+                ids.forEach((id) => e.target.insertAdjacentHTML('beforeend', `<input type="hidden" name="issue_ids[]" value="${Number(id)}">`));
+            });
             picks.forEach((p) => p.addEventListener('change', sync));
             document.querySelector('[data-meet-all]')?.addEventListener('change', (e) => {
                 picks.forEach((p) => (p.checked = e.target.checked));

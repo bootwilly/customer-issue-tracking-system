@@ -414,6 +414,7 @@ class MeetingController extends Controller
             'issue_no' => $issue?->issue_no, 'issue_url' => $issue ? route('issues.show', $issue->id) : null,
             'issue_label' => $issue ? $issue->title.'（'.$this->svc->issueStatusLabel($issue->status).'）' : null,
             'issue_closed' => $issue ? $this->svc->issueClosed($i) : false,
+            'issue_trashed' => $r->user()->seesInternal() && $this->svc->issueTrashed($i),
         ];
     }
 

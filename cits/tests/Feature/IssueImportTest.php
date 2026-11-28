@@ -238,6 +238,21 @@ it('turns a changed line of an imported row into an addendum', function () {
         ->and(($this->as)($this->pm)->postJson('/pm/issues/import/preview', ['file_id' => $file2, 'source' => 'S'])->json('rows.0.state'))->toBe('same');
 });
 
+it('blocks a line whose issue is in the recycle bin and imports it again after a permanent delete', function () {
+    $file = ($this->upload)($this->pm, impWorkbook([$this->rows[3]]));
+    $id = ($this->as)($this->pm)->postJson('/pm/issues/import/apply', ['file_id' => $file, 'source' => 'S', 'rows' => [['no' => '4', 'action' => 'create', 'images' => []]]])
+        ->assertOk()->json('done.0.issue_id');
+    ($this->as)($this->pm)->delete(route('issues.destroy', $id))->assertSessionHas('ok');
+
+    $row = ($this->as)($this->pm)->postJson('/pm/issues/import/preview', ['file_id' => $file, 'source' => 'S'])->json('rows.0');
+    expect($row['state'])->toBe('error')->and($row['errors'])->toContain('對應的內部單在回收筒，請先還原，或永久刪除後再重新匯入');
+
+    $adm = impUser('imadm', 'internal', ['project_admin'], $this->p);
+    $no = Issue::withTrashed()->find($id)->issue_no;
+    ($this->as)($adm)->delete(route('padmin.trash.issues.purge', $id), ['confirm_no' => $no])->assertSessionHas('ok');
+    expect(($this->as)($this->pm)->postJson('/pm/issues/import/preview', ['file_id' => $file, 'source' => 'S'])->json('rows.0.state'))->toBe('new');
+});
+
 it('accepts only the standard template', function () {
     $noVersion = ($this->upload)($this->pm, impWorkbook($this->rows, false, null));
     ($this->as)($this->pm)->postJson('/pm/issues/import/preview', ['file_id' => $noVersion, 'source' => 'S'])

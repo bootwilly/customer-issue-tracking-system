@@ -301,6 +301,14 @@ class MeetingRepository
 
     // ---- issues ----
 
+    /** Before an issue is deleted for good: its items keep the number as text (the FK then sets issue_id null). */
+    public function notePurgedIssue(int $issueId, string $note): void
+    {
+        MeetingItem::where('issue_id', $issueId)->get()->each(fn (MeetingItem $i) => $i->fill([
+            'discussion' => trim($note."\n".($i->discussion ?? '')), 'issue_id' => null,
+        ])->save());
+    }
+
     /** Live issue of a project by its number (case-insensitive). */
     public function issueByNo(int $projectId, string $issueNo): ?Issue
     {

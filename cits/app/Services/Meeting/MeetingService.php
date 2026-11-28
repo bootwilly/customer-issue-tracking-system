@@ -495,6 +495,12 @@ class MeetingService
     }
 
     /** Whether the item's linked issue reached a terminal status (closed / won't fix...). */
+    /** The item points at an issue that is in the recycle bin (the SoftDeletes scope hides it; a purge sets issue_id null). */
+    public function issueTrashed(?MeetingItem $i): bool
+    {
+        return $i !== null && $i->issue_id !== null && $i->issue === null;
+    }
+
     public function issueClosed(?MeetingItem $i): bool
     {
         return $i?->issue !== null && $this->wf->status('issue', $i->issue->status)->is_terminal;
@@ -851,7 +857,8 @@ class MeetingService
             $this->wf->assertTransition(self::ITEM_SCOPE, $item->status, (string) $in['status'], $u, $m->project_id);
             $d['status'] = (string) $in['status'];
         }
-        if (array_key_exists('issue_no', $in) && $u->seesInternal()) {
+        if (array_key_exists('issue_no', $in) && $u->seesInternal()
+            && ! (trim((string) $in['issue_no']) === '' && $this->issueTrashed($item))) { // empty box = hidden deleted issue, not a clear
             $no = trim((string) $in['issue_no']);
             $d['issue_id'] = $no === '' ? null
                 : ($this->repo->issueByNo($m->project_id, $no)?->id ?? throw new BusinessException("找不到問題單「{$no}」。"));
@@ -1069,6 +1076,9 @@ class MeetingService
             throw new BusinessException('沒有權限建立內部單。');
         }
         $i = $this->findItem($m, $itemId);
+        if ($this->issueTrashed($i)) {
+            throw new BusinessException('這個討論事項連結的內部單在回收筒，請專案管理員還原或永久刪除後再轉。');
+        }
         if ($i->issue_id) {
             throw new BusinessException('這個討論事項已經連結內部單 '.($i->issue?->issue_no ?? '').'。');
         }

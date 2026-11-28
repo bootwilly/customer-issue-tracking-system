@@ -12,6 +12,7 @@ use App\Services\Collab\NeedinfoService;
 use App\Services\Collab\TagService;
 use App\Services\Collab\WatchService;
 use App\Services\IssueService;
+use App\Services\IssueTrashService;
 use App\Services\Meeting\MeetingService;
 use App\Services\TicketService;
 use App\Services\WorkflowService;
@@ -31,6 +32,7 @@ class PmQueryService
         private WatchService $watch,
         private TagService $tags,
         private DependencyService $deps,
+        private IssueTrashService $trash,
     ) {}
 
     /** @param array{only_action?:bool,tq?:string,ni?:string,stage?:string,status?:string,origin?:string,q?:string,sort?:string,tags?:array} $f */
@@ -66,6 +68,7 @@ class PmQueryService
             'can' => [
                 'create' => $this->wf->can($u, 'issue.create', $projectId) && $this->wf->can($u, 'issue.edit_pm', $projectId),
                 'approve' => $approve,
+                'delete' => $this->trash->canDeleteSome($u, $projectId),
             ],
         ];
     }
@@ -174,6 +177,7 @@ class PmQueryService
             'deps' => $this->deps->forIssue($i),
             'depKinds' => $this->deps->kinds(),
             'canDeps' => $this->deps->canManage($u, $i),
+            'canDelete' => $this->trash->canDelete($u, $i),
         ];
     }
 

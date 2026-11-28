@@ -35,7 +35,7 @@ class ReportRepository
     {
         abort_unless(in_array($column, ['status', 'stage', 'origin', 'severity'], true), 500);
 
-        return DB::table('issues')->where('project_id', $pid)
+        return DB::table('issues')->where('project_id', $pid)->whereNull('deleted_at')
             ->whereBetween('created_at', [$from, $to])
             ->selectRaw("$column as k, count(*) as c")->groupBy($column)->pluck('c', 'k')
             ->map(fn ($v) => (int) $v)->all();
@@ -44,7 +44,7 @@ class ReportRepository
     /** Issues created since $since (UTC). */
     public function issueCreatedDates(int $pid, CarbonInterface $since): Collection
     {
-        return DB::table('issues')->where('project_id', $pid)->where('created_at', '>=', $since)->get(['id', 'created_at']);
+        return DB::table('issues')->where('project_id', $pid)->whereNull('deleted_at')->where('created_at', '>=', $since)->get(['id', 'created_at']);
     }
 
     /** Release events (transition into a released status) since $since (UTC). */
@@ -56,6 +56,7 @@ class ReportRepository
 
         return DB::table('events')->where('project_id', $pid)->where('subject_type', 'issue')
             ->whereIn('to_status', $releasedCodes)->where('created_at', '>=', $since)
+            ->whereIn('subject_id', DB::table('issues')->select('id')->where('project_id', $pid)->whereNull('deleted_at'))
             ->get(['subject_id', 'created_at']);
     }
 
@@ -63,7 +64,7 @@ class ReportRepository
     public function overdueIssues(int $pid, array $openStatuses, string $today): Collection
     {
         return DB::table('issues')->leftJoin('users', 'users.id', '=', 'issues.assignee_dev_id')
-            ->where('issues.project_id', $pid)->whereIn('issues.status', $openStatuses)
+            ->where('issues.project_id', $pid)->whereNull('issues.deleted_at')->whereIn('issues.status', $openStatuses)
             ->whereNotNull('issues.current_due')->whereDate('issues.current_due', '<', $today)
             ->orderBy('issues.current_due')->orderBy('issues.id')
             ->get(['issues.id', 'issues.issue_no', 'issues.title', 'issues.status', 'issues.current_due', 'issues.assignee_dev_id', 'users.name as dev_name']);
@@ -72,7 +73,7 @@ class ReportRepository
     /** Issues created in the period that were reworked at least once. */
     public function reworkIssues(int $pid, CarbonInterface $from, CarbonInterface $to): Collection
     {
-        return DB::table('issues')->where('project_id', $pid)->where('rework_count', '>', 0)
+        return DB::table('issues')->where('project_id', $pid)->whereNull('deleted_at')->where('rework_count', '>', 0)
             ->whereBetween('created_at', [$from, $to])
             ->orderByDesc('rework_count')->orderBy('id')
             ->get(['id', 'issue_no', 'title', 'status', 'rework_count']);
