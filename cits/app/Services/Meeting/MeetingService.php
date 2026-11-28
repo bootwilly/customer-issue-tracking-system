@@ -285,8 +285,7 @@ class MeetingService
         $keyword = $keyword !== null ? mb_substr(trim($keyword), 0, 100) : null;
         $shared = ! $u->seesInternal();
         if ($tab === 'mine') {
-            $items = $this->repo->ownedItems($pid, $u->id, $this->openItemStatuses(), $this->statusCodes(fn ($s) => ! $s->is_terminal), $shared)
-                ->filter(fn (MeetingItem $i) => $this->contentVisible($u, $i->meeting))->values();
+            $items = $this->repo->ownedItems($pid, $u->id, $this->openItemStatuses(), $this->statusCodes(fn ($s) => ! $s->is_terminal), $shared);
 
             return ['meetings' => collect(), 'unread' => [], 'items' => $items];
         }

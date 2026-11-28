@@ -251,12 +251,21 @@ class MeetingRepository
      */
     public function ownedItems(int $projectId, int $userId, array $itemStatuses, array $meetingStatuses, bool $sharedOnly): Collection
     {
-        return MeetingItem::with(['meeting:id,title,start_at,status,customer_visible,published_at,created_by', 'meeting.creator:id,user_type', 'issue:id,issue_no'])
-            ->where('owner_id', $userId)->whereIn('status', $itemStatuses ?: [''])
-            ->whereIn('meeting_id', Meeting::select('id')->where('project_id', $projectId)->whereNull('deleted_at')
-                ->whereIn('status', $meetingStatuses ?: [''])->when($sharedOnly, fn ($q) => $q->where('customer_visible', true)))
-            ->orderByRaw('CASE WHEN due_date IS NULL THEN 1 ELSE 0 END')->orderBy('due_date')->orderBy('id')
-            ->get();
+        return $this->ownedItemsQuery($projectId, $userId, $itemStatuses, $meetingStatuses, $sharedOnly)
+            ->with(['meeting:id,title,start_at,status,customer_visible,published_at,created_by', 'meeting.creator:id,user_type', 'issue:id,issue_no'])
+            ->orderByRaw('CASE WHEN due_date IS NULL THEN 1 ELSE 0 END')->orderBy('due_date')->orderBy('id')->get();
+    }
+
+    public function ownedItemsQuery(int $projectId, int $userId, array $itemStatuses, array $meetingStatuses, bool $sharedOnly): Builder
+    {
+        $meetings = Meeting::select('id')->where('project_id', $projectId)->whereNull('deleted_at')->whereIn('status', $meetingStatuses);
+        if ($sharedOnly) {
+            $meetings->where('customer_visible', true)->where(fn ($q) => $q->whereNotNull('published_at')
+                ->orWhereHas('creator', fn ($creator) => $creator->where('user_type', 'client')));
+        }
+
+        return MeetingItem::where('meeting_items.owner_id', $userId)->whereIn('meeting_items.status', $itemStatuses)
+            ->whereIn('meeting_items.meeting_id', $meetings);
     }
 
     // ---- comments ----

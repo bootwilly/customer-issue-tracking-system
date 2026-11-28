@@ -36,10 +36,11 @@ beforeEach(function () {
 
 it('lands a project-admin-only user on a page they can open (was /pm 403)', function () {
     $pa = bfUser('bfpa', 'internal', ['project_admin'], $this->p);
-    ($this->s)($pa)->get('/')->assertRedirect(route('meetings.index'));
-    ($this->s)($pa)->get(route('meetings.index'))->assertOk();
-    ($this->s)($this->pm)->get('/')->assertRedirect(route('pm.index'));
-    ($this->s)($this->client)->get('/')->assertRedirect(route('tickets.index'));
+    foreach ([$pa, $this->pm, $this->client] as $user) {
+        ($this->s)($user)->get('/')->assertRedirect(route('workbench'));
+        ($this->s)($user)->get(route('workbench'))->assertOk();
+    }
+    ($this->s)($pa)->get(route('pm.index'))->assertForbidden();
 });
 
 it('makes DEV name a tester when handing off, and keeps a tester the issue already has', function () {

@@ -8,7 +8,10 @@ use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Auth\HomeController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\ProjectSelectController;
+use App\Http\Controllers\WorkbenchController;
 use Illuminate\Support\Facades\Route;
+
+Route::middleware(['auth', 'active', 'project'])->get('/workbench', WorkbenchController::class)->name('workbench');
 
 Route::get('/', HomeController::class)->name('home');
 

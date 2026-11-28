@@ -99,6 +99,20 @@ it('shows project picker with several projects and switches', function () {
     expect(session('project_id'))->toBe($b->id);
 });
 
+it('resumes the original protected page after login and project selection', function () {
+    $user = authMakeUser(['account' => 'returning']);
+    foreach (['LINK1', 'LINK2'] as $code) {
+        $project = Project::create(['code' => $code, 'name' => $code, 'ticket_prefix' => $code]);
+        $project->members()->attach($user->id);
+    }
+    $url = route('workbench', ['tab' => 'watch']);
+    $this->get($url)->assertRedirect(route('home'));
+    $this->post('/login', ['login' => 'returning', 'password' => 'secret1'])->assertRedirect('/projects/select');
+    $this->get('/projects/select')->assertOk();
+    $this->post('/projects/select', ['project_id' => $project->id])->assertRedirect($url);
+    $this->get($url)->assertOk();
+});
+
 it('refuses selecting a project the user is not in', function () {
     $u = authMakeUser();
     $p = Project::create(['code' => 'X', 'name' => 'X', 'ticket_prefix' => 'X']);
@@ -106,10 +120,10 @@ it('refuses selecting a project the user is not in', function () {
     expect(session('project_id'))->toBeNull();
 });
 
-it('redirects home by user type', function () {
+it('opens the workbench from home for both account types', function () {
     $this->get('/')->assertOk();
-    $this->actingAs(authMakeUser(['user_type' => 'client']))->get('/')->assertRedirect('/tickets');
-    $this->actingAs(authMakeUser())->get('/')->assertRedirect('/pm');
+    $this->actingAs(authMakeUser(['user_type' => 'client']))->get('/')->assertRedirect('/workbench');
+    $this->actingAs(authMakeUser())->get('/')->assertRedirect('/workbench');
 });
 
 it('redirects http to https in production and adds HSTS', function () {

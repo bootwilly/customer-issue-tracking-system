@@ -32,6 +32,6 @@ class ProjectSelectController extends Controller
         $selectUrl = route('projects.select');
         $isSelect = rtrim(strtok($previous, '?'), '/') === rtrim($selectUrl, '/');
 
-        return $isSelect || ! $previous ? redirect()->route('home') : redirect($previous);
+        return $isSelect || ! $previous ? redirect()->intended(route('home')) : redirect($previous);
     }
 }

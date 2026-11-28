@@ -15,6 +15,7 @@
     $u = auth()->user();
     $nav = [];
     if ($u) {
+        if ($currentProject) { $nav[] = ['我的工作台', '/workbench', 'workbench']; }
         if (($u->isClient() || $u->is_admin) && $u->can('ticket.view')) { $nav[] = ['客戶問題', '/tickets', 'tickets*']; }
         if ($u->seesInternal() && $u->can('issue.view')) { $nav[] = ['問題管理', '/pm', 'pm*']; }
         if ($u->seesInternal() && $u->can('issue.view')) { $nav[] = ['開發管理', '/dev', 'dev*']; }

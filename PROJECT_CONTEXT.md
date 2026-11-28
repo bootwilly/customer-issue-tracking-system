@@ -178,3 +178,9 @@ Status: P1 deployed to production (https://<domain>/mescits/). P2 features in pr
 - Test lists and exports use the latest PM or DEV handoff into testing. A closure round uses only handoffs preceding its close_requested event (created_at, then event ID). Workflow transitions identify the source independently of the actor's current roles.
 - PM issue lists and exports show issue creation, first PM-to-DEV dispatch and latest test handoff with source. PM wrap-up rows use the close request as the cutoff for both handoffs. PM exports include customer tickets plus the selected internal tab with independent filters.
 - PM issue provenance is determined at creation. Meeting conversion and Excel import use the original issue events. Client-origin issues keep ticket numbers from creation for new entries; older entries explicitly show current links. Later links, agenda placement and import addenda do not reclassify an issue. Status sorting follows workflow_statuses.sort.
+
+## Personal workbench (2026-11-28)
+
+- The authenticated project home is /workbench. It reads source records directly through repositories. Each tab is scoped to the active project, account side and current permissions.
+- Personal work follows the current issue stage and assignee. Team work covers PM intake, due approvals, release and pooled release wrap-up. Schedules reuse active assignments and dates. Watched tickets/issues and saved queries stay independent of assignment.
+- Meeting items reuse the meetings module's ownership and client content visibility rules. Work dates are compared in Asia/Taipei; event timestamps use the standard UTC display conversion.

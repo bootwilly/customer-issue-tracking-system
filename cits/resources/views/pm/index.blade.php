@@ -83,7 +83,7 @@
             <h2 class="mb-2 text-base font-semibold text-amber-900">待審核的延期申請</h2>
             <ul class="space-y-2 text-sm">
                 @foreach ($dueRequests as $r)
-                    <li class="flex flex-wrap items-center gap-3 rounded bg-white p-2">
+                    <li id="due-review-{{ $r->id }}" class="flex flex-wrap items-center gap-3 rounded bg-white p-2">
                         <a href="{{ route('issues.show', $r->issue_id) }}" class="font-medium text-indigo-700 hover:underline">{{ $r->issue?->issue_no }}</a>
                         <span>{{ $r->issue?->title }}</span>
                         <span class="text-slate-500">{{ $r->old_due?->format('Y-m-d') ?: '-' }} → <b>{{ $r->new_due->format('Y-m-d') }}</b></span>

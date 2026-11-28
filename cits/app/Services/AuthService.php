@@ -18,38 +18,7 @@ class AuthService
         private UserRepository $users,
         private ProjectRepository $projects,
         private SettingRepository $settings,
-        private WorkflowService $wf,
     ) {}
-
-    /**
-     * Where a signed-in user lands: the first page their side and permissions open in the project.
-     * Without a selected project the side default is returned; the project middleware picks the project first.
-     */
-    public function landingRoute(User $user, ?int $projectId): string
-    {
-        $pages = $user->seesInternal() && ! $user->isClient()
-            ? [['pm.index', 'issue.view'], ['tickets.index', 'ticket.view']]
-            : [['tickets.index', 'ticket.view'], ['pm.index', 'issue.view']];
-        $pages = array_merge($pages, [
-            ['meetings.index', 'meeting.view'], ['flows.index', 'flow.view'],
-            ['padmin.index', 'project.members'], ['padmin.index', 'project.trash'],
-        ]);
-        if (! $projectId || ! $this->canUseProject($user, $projectId)) {
-            return $pages[0][0];
-        }
-        foreach ($pages as [$route, $perm]) {
-            $side = match ($route) {
-                'pm.index' => $user->seesInternal(),
-                'tickets.index' => $user->actsAsClient() || $user->seesInternal(),
-                default => true,
-            };
-            if ($side && $this->wf->can($user, $perm, $projectId)) {
-                return $route;
-            }
-        }
-
-        return 'manual.show';
-    }
 
     public function passwordMinLength(): int
     {
