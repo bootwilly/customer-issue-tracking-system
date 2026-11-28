@@ -19,6 +19,17 @@ class CounterRepository
         return $no;
     }
 
+    /** Number columns are unique across all projects (deleted issues included): kind => [table, column]. */
+    private const NUMBER_COLUMNS = ['ticket' => ['client_tickets', 'ticket_no'], 'issue' => ['issues', 'issue_no']];
+
+    /** Whether a ticket / issue number is already used by any project (a prefix may have belonged to another project before). */
+    public function numberTaken(string $kind, string $number): bool
+    {
+        [$table, $column] = self::NUMBER_COLUMNS[$kind] ?? throw new \InvalidArgumentException("unknown number kind {$kind}");
+
+        return DB::table($table)->where($column, $number)->exists();
+    }
+
     public function projectPrefix(int $projectId): string
     {
         return (string) Project::whereKey($projectId)->value('ticket_prefix');
