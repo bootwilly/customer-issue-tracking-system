@@ -6,11 +6,30 @@ use App\Models\ActivityEvent;
 use App\Models\OutboxMail;
 use App\Models\User;
 use App\Models\UserNotification;
+use App\Models\WorkflowTransition;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class EventRepository
 {
+    /** First internal status change through a dispatch transition, keyed by issue ID. */
+    public function firstDevDispatchTimes(int $projectId, array $issueIds, string $target): Collection
+    {
+        if (! $issueIds) {
+            return collect();
+        }
+        $sources = WorkflowTransition::where(['scope' => 'issue', 'to_code' => $target])
+            ->get(['from_code', 'permission'])
+            ->filter(fn ($t) => in_array('issue.dispatch', explode('|', $t->permission), true))
+            ->pluck('from_code');
+
+        return DB::table('events')
+            ->where(['project_id' => $projectId, 'subject_type' => 'issue', 'event_type' => 'status', 'to_status' => $target])
+            ->whereIn('from_status', $sources)->whereIntegerInRaw('subject_id', $issueIds)
+            ->groupBy('subject_id')->selectRaw('subject_id, MIN(created_at) AS dispatched_at')
+            ->pluck('dispatched_at', 'subject_id');
+    }
+
     public function log(int $projectId, string $subjectType, int $subjectId, string $type, ?string $from, ?string $to, int $actorId, array $payload = []): ActivityEvent
     {
         return ActivityEvent::create([

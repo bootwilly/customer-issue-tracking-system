@@ -17,6 +17,7 @@
                     @if ($isTest)
                         <th class="px-3 py-2">排程測試日</th><th class="px-3 py-2">預計上線日</th>
                     @else
+                        <th class="px-3 py-2">{{ \App\Services\Dev\DevService::DISPATCH_LABEL }}</th>
                         <th class="px-3 py-2">預計完工日</th><th class="px-3 py-2">退回</th>
                     @endif
                 </tr>
@@ -41,6 +42,7 @@
                             <td class="whitespace-nowrap px-3 py-2">{{ $i->test_scheduled_at?->toDateString() ?? '-' }}</td>
                             <td class="whitespace-nowrap px-3 py-2">{{ $i->release_planned_at?->toDateString() ?? '-' }}</td>
                         @else
+                            <td class="whitespace-nowrap px-3 py-2">{{ $dispatchTimes[$i->id] ?? '—' }}</td>
                             <td class="whitespace-nowrap px-3 py-2 {{ $late ? 'font-medium text-red-600' : '' }}">
                                 {{ $i->current_due?->toDateString() ?? '-' }}
                                 @if (in_array($i->id, $dueIds, true))

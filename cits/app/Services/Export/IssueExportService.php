@@ -19,8 +19,6 @@ class IssueExportService
 {
     private const TZ = 'Asia/Taipei';
 
-    private const DEV_TABS = ['active' => '待開發與進行中', 'all' => '全部', 'schedule' => '排程清單'];
-
     private const TEST_TABS = ['active' => '測試與上線', 'bounced' => '已退回/新發現'];
 
     public function __construct(
@@ -50,7 +48,7 @@ class IssueExportService
         $rows = $this->issues->listFiltered($projectId, $f, $this->xlsx->maxRows() + 1);
         $this->xlsx->assertWithinLimit($rows->count());
 
-        return $this->buildSheet($listKey, $sheetName, $rows, $weekOf);
+        return $this->buildSheet($projectId, $listKey, $sheetName, $rows, $weekOf);
     }
 
     /** PM issue list: $f = PmController::index validated filters (stage,status,origin,q,sort). */
@@ -62,6 +60,22 @@ class IssueExportService
     public function devBook(User $u, int $projectId, array $in): ExportBook
     {
         $fl = $this->dev->filters($u, $projectId, $in);
+        $info = ['頁籤' => DevService::TABS[$fl['tab']]];
+        if ($fl['tab'] === 'close') {
+            $rows = $this->dev->closeRounds($u, $projectId, $fl, $this->xlsx->maxRows() + 1);
+            $this->xlsx->assertWithinLimit($rows->count());
+            $sheet = new ExportSheet($info['頁籤'], DevService::CLOSE_COLUMNS, $rows->map(function ($row) {
+                $row['issue_no'] = new ExportLink($row['issue_no'], route('issues.show', $row['issue_id']).'#close-tasks');
+                unset($row['issue_id']);
+
+                return $row;
+            })->all());
+            $info['收尾狀態'] = $this->dev->closeStatuses()[$fl['status']];
+            $info['關鍵字'] = $fl['q'] !== '' ? $fl['q'] : '無';
+            $info['只看我待確認'] = $fl['mine'] ? '是' : '否';
+
+            return $this->book('dev_issues', $projectId, $sheet->name, $sheet, $info);
+        }
         if ($fl['tab'] === 'schedule') {
             $groups = $this->dev->scheduleGroups($this->dev->scheduleIssues($u, $projectId, $fl['mine']));
             $weeks = [];
@@ -73,12 +87,11 @@ class IssueExportService
                 }
             }
             $this->xlsx->assertWithinLimit($all->count());
-            $sheet = $this->buildSheet('dev_issues', '開發問題', $this->issues->loadExportRelations($all), fn (Issue $i) => $weeks[$i->id] ?? null);
+            $sheet = $this->buildSheet($projectId, 'dev_issues', '開發問題', $this->issues->loadExportRelations($all), fn (Issue $i) => $weeks[$i->id] ?? null);
         } else {
             $sheet = $this->issueSheet('dev_issues', $projectId, $fl['f'], '開發問題');
         }
 
-        $info = ['頁籤' => self::DEV_TABS[$fl['tab']]];
         if ($fl['tab'] !== 'schedule') {
             $info['狀態'] = $fl['status'] ? $this->wf->label('issue', $fl['status']) : '全部';
             $info['關鍵字'] = $fl['q'] !== '' ? $fl['q'] : '無';
@@ -112,7 +125,7 @@ class IssueExportService
     }
 
     /** @param Collection<int,Issue> $issues */
-    private function buildSheet(string $listKey, string $sheetName, Collection $issues, ?callable $weekOf): ExportSheet
+    private function buildSheet(int $projectId, string $listKey, string $sheetName, Collection $issues, ?callable $weekOf): ExportSheet
     {
         $today = CarbonImmutable::now(self::TZ)->startOfDay();
         $statusMap = $this->wf->statusMap('issue');
@@ -145,6 +158,11 @@ class IssueExportService
         }
 
         $cols = $this->columns->columns($listKey, array_keys($resolvers));
+        if ($listKey === 'dev_issues') {
+            $times = $this->dev->dispatchTimes($projectId, $issues->pluck('id')->all());
+            $cols['dispatched_at'] = DevService::DISPATCH_LABEL;
+            $resolvers['dispatched_at'] = fn (Issue $i) => $times[$i->id] ?? '—';
+        }
         $rows = [];
         foreach ($issues as $i) {
             $row = [];

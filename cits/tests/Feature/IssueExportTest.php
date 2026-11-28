@@ -1,18 +1,22 @@
 <?php
 
+use App\Models\ActivityEvent;
 use App\Models\Attachment;
 use App\Models\ClientTicket;
 use App\Models\Issue;
 use App\Models\LookupItem;
+use App\Models\Meeting;
 use App\Models\Project;
 use App\Models\User;
 use App\Repositories\IssueRepository;
 use App\Repositories\SettingRepository;
 use App\Services\Dev\DevService;
 use App\Services\Export\IssueExportService;
+use App\Services\IssueCloseService;
 use App\Services\IssueService;
 use App\Services\Pm\PmQueryService;
 use App\Services\Test\TestService;
+use App\Services\TicketService;
 use App\Services\WorkflowService;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
@@ -133,6 +137,123 @@ it('adds the week column on the dev schedule export', function () {
     expect($book->info['頁籤'])->toBe('排程清單');
 });
 
+it('shows the first PM dispatch in Taipei time on the four dev tabs and their Excel sheets', function ($source) {
+    $pid = $this->p->id;
+    $i = ieIssue($this->pm, $this->p, 'pm', ['status' => $source, 'current_due' => '2026-12-01']);
+    $this->travelTo(now('UTC')->setDateTime(2026, 10, 4, 19, 15), function () use ($i, $pid) {
+        app(IssueService::class)->transition($this->pm, $i->id, $pid, 'dev_todo', ['assignee_dev_id' => $this->dev->id]);
+    });
+    $other = ieIssue($this->dev, $this->p, 'dev', ['assignee_dev_id' => $this->dev->id, 'current_due' => '2026-12-01']);
+    foreach ([
+        [$i, 'issue', 'status', 'new', 'dev_todo', '2026-11-01'],
+        [$i, 'ticket', 'status', 'new', 'dev_todo', '2026-09-01'],
+        [$other, 'issue', 'close_withdrawn', 'closing', 'dev_todo', '2026-09-02'],
+        [$other, 'issue', 'status', 'new', 'test_pending', '2026-09-03'],
+        [$other, 'issue', 'status', 'test_failed', 'dev_doing', '2026-09-04'],
+    ] as [$issue, $subject, $type, $from, $to, $time]) {
+        ActivityEvent::create(['project_id' => $pid, 'subject_type' => $subject, 'subject_id' => $issue->id,
+            'event_type' => $type, 'from_status' => $from, 'to_status' => $to, 'actor_id' => $this->pm->id, 'created_at' => $time]);
+    }
+    foreach (['active', 'all', 'schedule', 'close'] as $tab) {
+        if ($tab === 'close') {
+            foreach ([$i, $other] as $issue) {
+                app(IssueCloseService::class)->request($this->pm, $pid, $issue->id, 'closed_pm', '完成', null);
+            }
+        }
+        $in = ['tab' => $tab, 'f' => 1];
+        ($this->as)($this->dev)->get(route('dev.index', $in))->assertOk()->assertSee('PM 派工時間')->assertSee('2026-10-05 03:15');
+        $sheet = $this->svc->devBook($this->dev, $pid, $in)->sheets[0];
+        $values = collect($sheet->rows)->pluck('dispatched_at')->sort()->values()->all();
+        expect($values)->toBe(['2026-10-05 03:15', '—']);
+        $download = ($this->as)($this->dev)->get(route('dev.export', $in))->assertOk();
+        expect(ieText(ieXml($download, 'xl/worksheets/sheet1.xml')))->toContain('PM 派工時間', '2026-10-05 03:15', '—');
+    }
+})->with(['new', 'discussing']);
+
+it('keeps each closure round, original target, progress and pending owners in the filtered export', function () {
+    $pid = $this->p->id;
+    $close = app(IssueCloseService::class);
+    $issue = ieIssue($this->pm, $this->p, 'pm', ['title' => '交接追蹤', 'status' => 'test_doing',
+        'assignee_dev_id' => $this->dev->id, 'assignee_test_id' => $this->tester->id]);
+    $close->request($this->pm, $pid, $issue->id, 'closed_pm', '第一次', null);
+    $close->finishTask($this->dev, $pid, $issue->closeTasks()->where('role', 'dev')->sole()->id, '已完成');
+    $close->withdraw($this->pm, $pid, $issue->id);
+    $pm = ($this->as)($this->pm);
+    $pm->post(route('meetings.store'), ['type' => 'regular', 'title' => '交接', 'start_at' => '2026-12-01 10:00', 'mode' => 'scheduled'])->assertSessionHasNoErrors();
+    $meeting = Meeting::sole();
+    $item = $pm->postJson(route('meetings.items.store', $meeting), ['topic' => '結論', 'issue_no' => $issue->issue_no])->assertOk()->json('item.id');
+    $pm->putJson(route('meetings.items.update', [$meeting, $item]), ['conclusion' => '同意結案'])->assertOk();
+    $pm->postJson(route('meetings.items.close-issue', [$meeting, $item]))->assertOk();
+    $tasks = $issue->closeTasks()->where('round', 2)->get()->keyBy('role');
+    $close->finishTask($this->dev, $pid, $tasks['dev']->id, '完成第二輪');
+
+    $active = ['tab' => 'close', 'q' => '交接'];
+    $page = ($this->as)($this->dev)->get(route('dev.index', $active))->assertOk();
+    $row = $page->viewData('rounds')->getCollection()->sole();
+    expect($row)->toMatchArray(['round' => 2, 'target' => '會議討論結案', 'progress' => '1／2', 'pending' => 'Test 收尾 '.$this->tester->name]);
+    $page->assertSee(route('issues.show', $issue).'#close-tasks')->assertSee($row['requested_at']);
+    expect($this->svc->devBook($this->dev, $pid, $active + ['mine' => 1])->sheets[0]->rows)->toBeEmpty();
+    $mine = $this->svc->devBook($this->tester, $pid, $active + ['mine' => 1]);
+    expect($mine->sheets[0]->rows[0]['progress'])->toBe('1／2')->and($mine->info['只看我待確認'])->toBe('是');
+    $close->finishTask($this->tester, $pid, $tasks['test']->id, '完成');
+
+    $all = ['tab' => 'close', 'status' => 'all', 'q' => $issue->issue_no];
+    $page = ($this->as)($this->dev)->get(route('dev.index', $all))->assertOk();
+    $sheet = $this->svc->devBook($this->dev, $pid, $all)->sheets[0];
+    expect($page->viewData('rounds')->pluck('round')->all())->toBe([1, 2]);
+    foreach ($page->viewData('rounds') as $index => $row) {
+        foreach ($sheet->columns as $key => $heading) {
+            expect($key === 'issue_no' ? $sheet->rows[$index][$key]->text : $sheet->rows[$index][$key])->toBe($row[$key]);
+        }
+    }
+    expect($sheet->rows[0])->toMatchArray(['status' => '已撤回', 'target' => 'PM結案', 'progress' => '1／2', 'pending' => '—']);
+    expect($sheet->rows[1])->toMatchArray(['status' => '已完成', 'target' => '會議討論結案', 'progress' => '2／2', 'pending' => '—']);
+    foreach (['void' => 1, 'done' => 2] as $state => $round) {
+        $filtered = $this->svc->devBook($this->dev, $pid, ['status' => $state] + $all)->sheets[0];
+        expect(array_column($filtered->rows, 'round'))->toBe([$round]);
+    }
+    expect($this->svc->devBook($this->dev, $pid, ['q' => '無匹配'] + $all)->sheets[0]->rows)->toBeEmpty();
+    $issue->delete();
+    expect($this->svc->devBook($this->dev, $pid, $all)->sheets[0]->rows)->toBeEmpty();
+});
+
+it('scopes release pool rounds by permission and project and protects the dev routes', function () {
+    $pid = $this->p->id;
+    $close = app(IssueCloseService::class);
+    $pool = ieIssue($this->pm, $this->p, 'pm', ['status' => 'release_pending']);
+    $close->request($this->pm, $pid, $pool->id, 'closed_pm', '需要上線確認', null);
+    $direct = ieIssue($this->pm, $this->p, 'pm');
+    $close->request($this->pm, $pid, $direct->id, 'closed_pm', '直接結案', null);
+    $second = Project::create(['code' => 'OTHER', 'name' => 'OTHER', 'ticket_prefix' => 'OTH']);
+    $secondPm = ieUser('otherpm', 'internal', ['internal_pm'], $second);
+    $foreign = ieIssue($secondPm, $second, 'pm', ['status' => 'release_pending']);
+    $close->request($secondPm, $second->id, $foreign->id, 'closed_pm', '另一個專案', null);
+    $in = ['tab' => 'close', 'mine' => 1];
+    $view = fn ($user, $filters) => ($this->as)($user)->get(route('dev.index', $filters))->assertOk()->viewData('rounds');
+    expect($view($this->dev, ['tab' => 'close', 'status' => 'all'])->pluck('issue_id')->all())->toBe([$pool->id])
+        ->and($view($this->dev, $in)->total())->toBe(0)
+        ->and($view($this->tester, $in)->getCollection()->sole()['pending'])->toBe('上線收尾 上線負責人');
+    ($this->as)($this->client)->get(route('dev.index', $in))->assertForbidden();
+    ($this->as)($this->client)->get(route('dev.export', $in))->assertForbidden();
+});
+
+it('exports all matching wrap-up pages in request order and enforces the export limit', function () {
+    $pid = $this->p->id;
+    $issue = ieIssue($this->pm, $this->p, 'pm', ['status' => 'dev_todo', 'assignee_dev_id' => $this->dev->id]);
+    $close = app(IssueCloseService::class);
+    for ($round = 1; $round <= 21; $round++) {
+        $close->request($this->pm, $pid, $issue->id, 'closed_pm', '驗證輪次', null);
+        $close->withdraw($this->pm, $pid, $issue->id);
+    }
+    $in = ['tab' => 'close', 'status' => 'void', 'q' => $issue->issue_no, 'page' => 2];
+    $page = ($this->as)($this->dev)->get(route('dev.index', $in))->assertOk()->viewData('rounds');
+    expect($page->total())->toBe(21)->and($page->pluck('round')->all())->toBe([21])
+        ->and($page->previousPageUrl())->toContain('tab=close', 'status=void', 'q='.$issue->issue_no);
+    expect(array_column($this->svc->devBook($this->dev, $pid, $in)->sheets[0]->rows, 'round'))->toBe(range(1, 21));
+    app(SettingRepository::class)->set('export.max_rows', '20');
+    ($this->as)($this->dev)->get(route('dev.export', $in))->assertRedirect(route('dev.index', $in))->assertSessionHas('err');
+});
+
 it('computes overdue days in Taipei time for non-terminal issues only', function () {
     $due = now('Asia/Taipei')->subDays(3)->toDateString();
     ieIssue($this->dev, $this->p, 'dev', ['title' => '逾期', 'assignee_dev_id' => $this->dev->id, 'current_due' => $due]);
@@ -196,7 +317,7 @@ it('shows the export button to permitted users', function () {
 
 it('exports the PM page as one workbook with ticket and issue sheets', function () {
     $client = ieUser('iepmc', 'client', ['client_pm'], $this->p);
-    $ts = app(\App\Services\TicketService::class);
+    $ts = app(TicketService::class);
     $t = $ts->create($client, $this->p->id, ['ticket_type' => 'requirement', 'title' => 'PM匯出客戶單', 'content_html' => '<p>客戶內容</p>']);
     $ts->accept($this->pm, $t->id, $this->p->id);
     ieIssue($this->pm, $this->p, 'pm', ['title' => 'PM匯出內部單']);
@@ -213,8 +334,8 @@ it('exports the PM page as one workbook with ticket and issue sheets', function 
     }
     expect($all)->toContain('PM匯出客戶單')->toContain('PM匯出內部單')->toContain('客戶內容');
 
-    \App\Models\ActivityEvent::where('subject_type', 'export')->exists() || throw new RuntimeException('no audit');
+    ActivityEvent::where('subject_type', 'export')->exists() || throw new RuntimeException('no audit');
     ieIssue($this->pm, $this->p, 'pm', ['title' => '第二筆']);
-    app(\App\Repositories\SettingRepository::class)->set('export.max_rows', '1');
+    app(SettingRepository::class)->set('export.max_rows', '1');
     $s()->get('/pm/export?oa=0')->assertRedirect()->assertSessionHas('err');
 });

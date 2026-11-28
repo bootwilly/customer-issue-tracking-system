@@ -5,24 +5,39 @@ namespace App\Services\Dev;
 use App\Exceptions\BusinessException;
 use App\Models\Issue;
 use App\Models\User;
+use App\Repositories\EventRepository;
+use App\Repositories\IssueCloseRepository;
 use App\Repositories\IssueRepository;
 use App\Repositories\MesPageRepository;
+use App\Repositories\PmQueryRepository;
 use App\Repositories\TimelineRepository;
 use App\Services\IssueService;
 use App\Services\WorkflowService;
 use Carbon\Carbon;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
 
 class DevService
 {
+    public const TABS = ['active' => '待開發與進行中', 'all' => '全部', 'schedule' => '排程清單', 'close' => '結案收尾'];
+
+    public const DISPATCH_LABEL = 'PM 派工時間';
+
+    public const CLOSE_COLUMNS = [
+        'issue_no' => '單號', 'title' => '標題', 'dispatched_at' => self::DISPATCH_LABEL,
+        'round' => '輪次', 'target' => '結案方式', 'requested_at' => '送出結案時間',
+        'status' => '收尾狀態', 'progress' => '已完成／總數', 'pending' => '待確認人員',
+    ];
+
     public function __construct(
         private IssueRepository $issues,
         private IssueService $issueService,
         private WorkflowService $wf,
         private TimelineRepository $timeline,
         private MesPageRepository $mes,
-        private \App\Repositories\PmQueryRepository $users,
-        private \App\Repositories\EventRepository $events,
+        private PmQueryRepository $users,
+        private EventRepository $events,
+        private IssueCloseRepository $closeTasks,
     ) {}
 
     public function canView(User $u, int $pid): bool
@@ -48,13 +63,19 @@ class DevService
      */
     public function filters(User $u, int $pid, array $in): array
     {
-        $tab = in_array($in['tab'] ?? '', ['active', 'all', 'schedule'], true) ? $in['tab'] : 'active';
+        $tab = is_string($in['tab'] ?? null) && isset(self::TABS[$in['tab']]) ? $in['tab'] : 'active';
+        $q = is_string($in['q'] ?? null) ? trim($in['q']) : '';
+        $selected = is_string($in['status'] ?? null) ? $in['status'] : '';
+        if ($tab === 'close') {
+            $status = array_key_exists($selected, $this->closeStatuses()) ? $selected : 'pending';
+
+            return ['tab' => $tab, 'mine' => ! empty($in['mine']), 'status' => $status, 'q' => $q, 'overdue' => false, 'f' => null];
+        }
         $statusMap = $this->wf->statusMap('issue');
         $devCodes = $this->wf->codesForStage($this->wf->lookupValue('stage_role', 'dev'));
         $mine = isset($in['f']) ? ! empty($in['mine']) : $this->canManage($u, $pid);
-        $status = isset($in['status'], $statusMap[$in['status']]) ? $in['status'] : null;
+        $status = isset($statusMap[$selected]) ? $selected : null;
         $overdue = ! empty($in['overdue']);
-        $q = trim((string) ($in['q'] ?? ''));
         $out = ['tab' => $tab, 'mine' => $mine, 'status' => $status, 'overdue' => $overdue, 'q' => $q, 'f' => null];
         if ($tab === 'schedule') {
             return $out;
@@ -93,6 +114,7 @@ class DevService
         $devCodes = $this->wf->codesForStage($this->wf->lookupValue('stage_role', 'dev'));
 
         $data = [
+            'tabs' => self::TABS,
             'tab' => $tab, 'mine' => $fl['mine'], 'status' => $fl['status'], 'overdue' => $fl['overdue'], 'q' => $fl['q'],
             'statusOptions' => $statusMap->only($tab === 'all' ? $statusMap->keys()->all() : $devCodes)->map->name->all(),
             'canManage' => $this->canManage($u, $pid),
@@ -100,16 +122,61 @@ class DevService
             'testUsers' => $this->users->usersByIds($this->events->userIdsWithPermission($pid, 'test.manage')),
         ];
 
+        if ($tab === 'close') {
+            $data['statusOptions'] = $this->closeStatuses();
+            $data['rounds'] = $this->closeRounds($u, $pid, $fl);
+            $data['closeColumns'] = self::CLOSE_COLUMNS;
+
+            return $data;
+        }
         if ($tab === 'schedule') {
-            $data['groups'] = $this->scheduleGroups($this->scheduleIssues($u, $pid, $fl['mine']));
+            $scheduled = $this->scheduleIssues($u, $pid, $fl['mine']);
+            $data['groups'] = $this->scheduleGroups($scheduled);
+            $data['dispatchTimes'] = $this->dispatchTimes($pid, $scheduled->pluck('id')->all());
 
             return $data;
         }
 
         $data['issues'] = $this->issues->paginate($pid, $fl['f'], 20)->appends(['f' => 1]);
+        $data['dispatchTimes'] = $this->dispatchTimes($pid, $data['issues']->pluck('id')->all());
         $data['dueIds'] = $this->issues->pendingDueRequests($pid)->pluck('issue_id')->all();
 
         return $data;
+    }
+
+    public function dispatchTimes(int $pid, array $issueIds): Collection
+    {
+        return $this->events->firstDevDispatchTimes($pid, $issueIds, $this->wf->initial('issue_initial', 'dev'))
+            ->map(fn ($time) => tw($time));
+    }
+
+    public function closeStatuses(): array
+    {
+        return ['all' => '全部', 'pending' => $this->wf->label('issue', $this->wf->lookupValue('issue_close_state', 'wrapup'))]
+            + $this->wf->lookupMapAll('issue_close_task_status');
+    }
+
+    /** Same round filters, order and displayed values for HTML and Excel. */
+    public function closeRounds(User $u, int $pid, array $fl, ?int $limit = null): Collection|LengthAwarePaginator
+    {
+        $result = $this->closeTasks->rounds($pid, $fl['status'] === 'all' ? null : $fl['status'], $fl['q'],
+            $fl['mine'] ? $u->id : null, (bool) $u->is_admin, $fl['mine'] && $this->wf->can($u, 'release.manage', $pid), $limit);
+        $rows = $result instanceof LengthAwarePaginator ? $result->getCollection() : $result;
+        $times = $this->dispatchTimes($pid, $rows->pluck('issue_id')->unique()->values()->all());
+        $roles = $this->wf->lookupMapAll('issue_close_role');
+        $statuses = $this->closeStatuses();
+        $pending = $this->closeTasks->pendingOwners($rows->where('round_status', 'pending')->pluck('issue_id')->all())
+            ->groupBy(fn ($t) => $t->issue_id.'-'.$t->round)
+            ->map(fn ($tasks) => $tasks->map(fn ($t) => ($roles[$t->role] ?? $t->role).' '.($t->name ?? '上線負責人'))->implode('、'));
+        $rows->transform(fn ($r) => [
+            'issue_id' => $r->issue_id, 'issue_no' => $r->issue_no, 'title' => $r->title,
+            'dispatched_at' => $times[$r->issue_id] ?? '—', 'round' => (int) $r->round,
+            'target' => $this->wf->label('issue', $r->target), 'requested_at' => tw($r->requested_at),
+            'status' => $statuses[$r->round_status], 'progress' => $r->done_count.'／'.$r->total,
+            'pending' => $pending[$r->issue_id.'-'.$r->round] ?? '—',
+        ]);
+
+        return $result;
     }
 
     /** @return array<string, Collection> group label => issues */
